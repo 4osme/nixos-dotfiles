@@ -12,7 +12,8 @@
     ./packages.nix
     ./zsh.nix
     ./services.nix
-    ./sync.nix
+    ./dotfiles.nix
+    ./theme.nix
   ];
 
   home.username = "underdone";

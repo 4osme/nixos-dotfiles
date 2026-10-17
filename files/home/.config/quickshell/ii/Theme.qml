@@ -3,7 +3,12 @@ import QtQuick
 
 QtObject {
     // ── Active theme name ──────────────────────────────────────────
-    property string currentTheme: "md3-cobalt-night"
+    // Fixed: the theme no longer switches at runtime (apply-theme.sh is
+    // omitted on NixOS). The table below is the "Alchemist" parameter table
+    // from fedora-hyprtomic; md3-amethyst is baked as the default, and the
+    // matching static files live in files/home (gtk.css, qt colors, Kvantum,
+    // rofi colors, ghostty theme.conf, hypr/theme.lua).
+    property string currentTheme: "md3-amethyst"
 
     // ── Theme definitions ──────────────────────────────────────────
     readonly property var _themes: ({
@@ -177,5 +182,4 @@ QtObject {
 
     // ── Theme metadata access ──────────────────────────────────────
     readonly property string themeName: _t.name
-    readonly property var themeKeys: Object.keys(_themes)
 }

@@ -46,6 +46,13 @@
     wtype
     ydotool
     jq
+    python3 # ~/.config/sunshine/hypr-stream-display.py (main-desktop)
+
+    # Icon themes / cursors named by the configs (gtk settings.ini, qt6ct,
+    # dconf icon-theme).
+    papirus-icon-theme
+    tela-circle-icon-theme
+    bibata-cursors
 
     # Qt theme tools (the configs in ~/.config/qt{5,6}ct + Kvantum are synced;
     # these are the binaries apply-theme.sh / the settings.ini expect).

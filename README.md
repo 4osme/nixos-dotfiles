@@ -56,30 +56,36 @@ nixos-generate-config --root /mnt
 # 4. インストール
 nixos-install --flake /mnt/var/lib/dotfiles#main-desktop
 
-# 5. 初回起動後
-hyprtomic-config-sync          # dotfiles を $HOME へ (既存はスキップ)
-#    --overwrite で管理ファイルの更新+削除されたものの prune (ujust と同じ意味)
+# 5. 初回起動後 (Home Manager の dotfiles を $HOME へ反映するため一度 switch)
+sudo nixos-rebuild switch --flake ~/repository/dotfiles#main-desktop
 passwd underdone
 fprintd-enroll                 # 指紋 (CS9711F) の登録
 ```
 
-以後の更新は `nixos-rebuild switch --flake .#main-desktop` →
-`hyprtomic-config-sync --overwrite` → 再ログイン。
+以後の更新は `sudo nixos-rebuild switch --flake .#main-desktop` のみ
+(dotfiles・テーマ・モニタ設定は Home Manager が同時に反映)。
 
-## dotfiles の配布方法 (sync)
+## dotfiles の配布方法 (Home Manager)
 
-fedora-hyprtomic と同じ契約です: `files/home` (+ ホスト別オーバーレイ) を
-Nix store に固定し、`hyprtomic-config-sync` が `$HOME` へコピーします。
+`files/home` (+ ホスト別オーバーレイ `files/home-<host>`) の全ファイルを
+**Home Manager (`xdg.configFile` / `home.file`) で $HOME に展開**します
+(fedora-hyprtomic の skel 同期 `hyprtomic-config-sync` は廃止)。
 
-- 既定: **存在するファイルは触らない** (手元の変更を守る)。
-- `--overwrite`: 管理ファイルを置換し、以前の同期で入れて今は無いファイルを
-  manifest (`~/.local/state/hyprtomic/skel-manifest`) に基づき削除。
-- テーマスクリプト (`apply-theme.sh`) が実行時に書き換えるファイル
-  (gtk.css, qt colors, rofi colors, `~/.config/hypr/theme.lua`) や
-  nwg-displays の生成物 (`monitors.lua` / `workspaces.lua`)、
-  `~/.config/hypr/local.conf` は管理外のまま。**読み取り専用の store
-  シンボリックリンクにはしない** (テーマ切替が壊れるため)。
-- 解像度 `resolve-icons` ラッパー (`pkgs/resolve-icons`) が pygobject 依存を供給します。
+- 内容は Nix store からの読み取り専用リンク。`nixos-rebuild switch` /
+  `home-manager switch` のたびに一致します(旧ファイルは `.hm-backup` へ退避)。
+- 実行時に書き換えられる dotfile を無くすため、**テーマ切替 (`apply-theme.sh`)
+  は廃止**。テーマは md3-amethyst 固定で、Theme.qml のパラメータテーブルが
+  唯一の定義(対応する gtk.css / qt colors / Kvantum / rofi colors /
+  ghostty theme.conf / kdeglobals / hypr/theme.lua は files/home に同梱の静的値)。
+- モニタ/ワークスペース (`monitors.lua` / `workspaces.lua`)・ホスト固有の
+  Lua (`host.lua`: quadgrid・Cider/X の配置・Sunshine プロファイル)は
+  `files/home-main-desktop/` 側で HM 管理。
+- デバッグ用の `~/.config/hypr/local.conf` だけは**管理外**のまま残しています
+  (`hyprland.lua` が最後に読み込むため、既定を一時的に上書きして検証できます)。
+- fcitx5 (`profile` / `classicui.conf`) と gsettings 相当 (dconf) も HM 管理。
+- 旧 skel 同期時代の残骸 (`~/.local/state/hyprtomic/`, `~/.config/quickshell/ii/current-theme`)
+  は移行後に手で削除して構いません (もう参照されません)。
+- アイコン解決 `resolve-icons` ラッパー (`pkgs/resolve-icons`) が pygobject 依存を供給します。
 
 ## fedora-hyprtomic からの主な変更点
 
@@ -88,6 +94,13 @@ Nix store に固定し、`hyprtomic-config-sync` が `$HOME` へコピーしま�
   実行。`hyprtomic-gui-shell` / `hyprtomic-distrobox-apps` は不要になり、
   ランチャーは Host (ネイティブ) と Flatpak の 2 ソースに整理 (`Launcher.qml`
   の `guiContainer` フォールバックを Host に変更)。
+- **dotfiles は Home Manager 管理 / テーマ固定**: `files/home` を
+  `xdg.configFile`/`home.file` でリンク (`hyprtomic-config-sync` 廃止)。
+  `apply-theme.sh` とテーマ切替 UI も廃止し、**md3-amethyst 固定**
+  (Theme.qml のパラメータテーブル = Alchemist が唯一の定義)。
+  モニタ/ワークスペースと host.lua (quadgrid・Cider/X 配置・Sunshine) は
+  main-desktop オーバーレイで HM 管理、`local.conf` はデバッグ導線として残存。
+  fcitx5・dconf も HM 管理。
 - **Flatpak**: `org.mozilla.firefox` と `org.gnome.Loupe` のみ事前導入
   (Fedora と同じ)。Bitwarden / Mission Center / Vesktop / Chrome /
   EasyEffects は Nix パッケージ (AGENTS.md の検討事項の暫定判断)。

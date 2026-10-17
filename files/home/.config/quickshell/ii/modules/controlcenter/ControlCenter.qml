@@ -174,28 +174,10 @@ Scope {
         onExited: btStatusProc.running = true
     }
 
-    // ── Theme persistence ────────────────────────────────────────
-    Process {
-        id: themeSaveProc
-        command: ["sh", "-c", "echo '" + Root.Theme.currentTheme + "' > ~/.config/quickshell/ii/current-theme"]
-    }
-
-    Process {
-        id: themeApplyProc
-        command: ["sh", "-c", "~/.config/quickshell/ii/scripts/apply-theme.sh " + Root.Theme.currentTheme]
-    }
-
-    // Re-apply the saved theme on every shell start so Hyprland / Qt / GTK /
-    // ghostty stay in sync even when the theme did not change.
-    Component.onCompleted: themeApplyProc.running = true
-
-    Connections {
-        target: Root.Theme
-        function onCurrentThemeChanged() {
-            themeSaveProc.running = true;
-            themeApplyProc.running = true;
-        }
-    }
+    // ── Theme ────────────────────────────────────────────────────
+    // The theme is fixed (md3-amethyst, the Alchemist parameter table in
+    // Theme.qml) and managed by Home Manager; there is no runtime theme
+    // switching or persistence anymore.
 
     // Poll status every 8s while panel is visible
     Timer {
@@ -397,18 +379,6 @@ Scope {
                                         airplaneBtProc.running = true
                                     }
                                 }
-
-                                FeatureTile {
-                                    Layout.columnSpan: 2
-                                    Layout.fillWidth: true
-                                    active: true
-                                    icon: "󰏘"
-                                    label: "Theme"
-                                    subtitle: Root.Theme.themeName
-                                    hasDetail: true
-                                    onDetailClicked: controlCenter.currentPage = "theme"
-                                    onClicked: controlCenter.currentPage = "theme"
-                                }
                             }
 
                             VolumeSection {
@@ -461,23 +431,8 @@ Scope {
                         }
                     }
 
-                    // THEME SUB-PAGE
-                    ThemeSection {
-                        width: pageContainer.width
-                        height: pageContainer.height
-                        x: controlCenter.currentPage === "theme" ? 0 : pageContainer.width
-
-                        Behavior on x {
-                            NumberAnimation {
-                                duration: Root.Theme.animDuration
-                                easing.type: Easing.OutCubic
-                            }
-                        }
-
-                        onBack: {
-                            controlCenter.currentPage = "main"
-                        }
-                    }
+                    // (The theme sub-page was removed: the theme is fixed by
+                    // Home Manager, so there is nothing to switch.)
                 }
             }  // end Rectangle (panel)
             }  // end Item (panelClip)

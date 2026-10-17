@@ -16,21 +16,9 @@ import "modules/shelf" as Shelf
 ShellRoot {
     id: root
 
-    // ── Theme persistence — read saved theme on startup ──────────
-    Process {
-        id: themeReadProc
-        command: ["sh", "-c", "cat ~/.config/quickshell/ii/current-theme 2>/dev/null || true"]
-        stdout: StdioCollector {
-            onStreamFinished: {
-                var theme = text.trim();
-                if (theme !== "" && Theme._themes[theme] !== undefined) {
-                    Theme.currentTheme = theme;
-                }
-            }
-        }
-    }
-
-    Component.onCompleted: themeReadProc.running = true
+    // The theme is fixed (md3-amethyst, see Theme.qml); Home Manager owns the
+    // theme files (gtk.css, qt colors, Kvantum, rofi, ghostty, hypr/theme.lua).
+    // There is no current-theme file and no apply-theme.sh anymore.
 
     // --- Module Instances ---
     // Each component manages its own visibility and IPC handler internally.
