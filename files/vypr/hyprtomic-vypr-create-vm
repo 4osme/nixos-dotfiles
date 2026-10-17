@@ -1,0 +1,198 @@
+#!/usr/bin/env bash
+# hyprtomic-vypr-create-vm — NixOS port of fedora-hyprtomic's
+# `ujust vypr-create-vm` (hyprtomic-vypr-create-vm).
+#
+# Creates a Vypr-ready Windows 11 VM: UEFI + Secure Boot + TPM 2.0, SATA
+# disk and e1000e NIC (no extra Windows drivers needed), spice console for
+# the installation, and an optional passed-through GPU as a managed hostdev.
+#
+# What differs from the Fedora script (all of it is declarative on NixOS):
+#   * the IOMMU kernel args (see modules/environments/main-desktop/vfio.nix),
+#   * /etc/libvirt/qemu.conf, the libvirtd group and the daemon sockets
+#     (see modules/system/virt.nix + the vypr environment module),
+#   * the ostree swtpm-localca / network dir healing.
+set -euo pipefail
+
+NAME="${VYPR_VM_NAME:-win11}"
+MEMORY="${VYPR_VM_MEMORY:-8192}"
+VCPUS="${VYPR_VM_VCPUS:-4}"
+DISK="${VYPR_VM_DISK:-64}"
+GPU="ask" # ask | none | auto | 0000:03:00.0
+YES=0
+DRY_RUN=0
+ISO=""
+
+msg() { printf '%s\n' "$*"; }
+die() {
+  printf 'error: %s\n' "$*" >&2
+  exit 1
+}
+
+usage() {
+  cat <<EOF
+usage: hyprtomic-vypr-create-vm [options] <windows.iso>
+
+options:
+  --name NAME           libvirt domain name (default: $NAME)
+  --memory MiB          guest RAM (default: $MEMORY)
+  --vcpus N             vCPUs (default: $VCPUS)
+  --disk GiB            disk size (default: $DISK)
+  --gpu ADDR|auto|none  attach a passed-through GPU (default: ask)
+  --yes                 assume yes / pick defaults
+  --dry-run             print the virt-install command only
+  -h, --help            show this help
+
+With no <windows.iso> the script looks in Downloads, Documents and Desktop.
+EOF
+}
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --name)
+      NAME="$2"
+      shift 2
+      ;;
+    --memory)
+      MEMORY="$2"
+      shift 2
+      ;;
+    --vcpus)
+      VCPUS="$2"
+      shift 2
+      ;;
+    --disk)
+      DISK="$2"
+      shift 2
+      ;;
+    --gpu)
+      GPU="$2"
+      shift 2
+      ;;
+    --yes)
+      YES=1
+      shift
+      ;;
+    --dry-run)
+      DRY_RUN=1
+      shift
+      ;;
+    -h | --help)
+      usage
+      exit 0
+      ;;
+    -*)
+      die "unknown option: $1 (see --help)"
+      ;;
+    *)
+      ISO="$1"
+      shift
+      ;;
+  esac
+done
+
+command -v virsh >/dev/null || die "virsh not found"
+command -v virt-install >/dev/null || die "virt-install not found"
+
+if virsh dominfo "$NAME" >/dev/null 2>&1; then
+  die "libvirt domain '$NAME' already exists (use hyprtomic-vypr-setup to configure it)"
+fi
+
+# Find the ISO when it was not given.
+if [ -z "$ISO" ]; then
+  for d in "$HOME/Downloads" "$HOME/Documents" "$HOME/Desktop"; do
+    [ -d "$d" ] || continue
+    for f in "$d"/*.iso "$d"/*.ISO; do
+      if [ -f "$f" ]; then
+        ISO="$f"
+        break 2
+      fi
+    done
+  done
+fi
+[ -n "$ISO" ] || die "no Windows ISO given or found (searched Downloads, Documents, Desktop)"
+[ -f "$ISO" ] || die "no such ISO: $ISO"
+
+# virt-install crashes listing a pool whose directory has non-UTF-8 names;
+# hardlink the ISO into a clean directory in that case.
+iso_dir="$(dirname "$ISO")"
+if LC_ALL=C find "$iso_dir" -maxdepth 1 -name '*.iso' -printf '%f\n' 2>/dev/null | LC_ALL=C grep -q '[^ -~]'; then
+  stage="$HOME/.local/share/vypr/iso"
+  install -d "$stage"
+  if [ "$iso_dir" != "$stage" ]; then
+    ln -f "$ISO" "$stage/$(basename "$ISO")"
+    ISO="$stage/$(basename "$ISO")"
+  fi
+fi
+
+# Default storage pool (the Fedora script defined it the same way).
+if ! virsh pool-info default >/dev/null 2>&1; then
+  virsh pool-define-as default dir --target /var/lib/libvirt/images
+fi
+virsh pool-autostart default >/dev/null 2>&1 || true
+virsh pool-info default | grep -q 'State:.*running' || virsh pool-start default >/dev/null 2>&1 || true
+
+# Default NAT network (the XML is placed by the NixOS libvirtd module; define
+# it when this is the first boot that needs it).
+if ! virsh net-info default >/dev/null 2>&1; then
+  virsh net-define /var/lib/libvirt/qemu/networks/default.xml ||
+    die "could not define the default network"
+fi
+virsh net-autostart default >/dev/null 2>&1 || true
+virsh net-info default | grep -q 'Active:.*yes' || virsh net-start default >/dev/null 2>&1 || true
+
+# Secure boot firmware if the OVMF metadata is present.
+BOOT_ARGS="uefi"
+if compgen -G '/run/libvirt/nix-ovmf/*secboot*' >/dev/null 2>&1; then
+  BOOT_ARGS="uefi,loader.secure=yes"
+fi
+
+set -- \
+  --name "$NAME" \
+  --osinfo win11 \
+  --memory "$MEMORY" \
+  --vcpus "$VCPUS" \
+  --cpu host-passthrough \
+  --machine q35 \
+  --boot "$BOOT_ARGS" \
+  --features smm.state=on \
+  --tpm backend.type=emulator,backend.version=2.0 \
+  --disk "path=/var/lib/libvirt/images/$NAME.qcow2,size=$DISK,format=qcow2,bus=sata" \
+  --cdrom "$ISO" \
+  --network network=default,model=e1000e \
+  --graphics spice,listen=none \
+  --video qxl \
+  --noautoconsole
+
+if [ "$DRY_RUN" = 1 ]; then
+  printf 'virt-install \\\n'
+  printf '  %s \\\n' "$@"
+  exit 0
+fi
+
+msg "Creating '$NAME' (this starts the VM; install Windows over the spice console):"
+msg "  virt-manager --connect qemu:///system --show-domain-console $NAME"
+virt-install "$@"
+
+# Skip OVMF's "Press any key to boot from CD or DVD" prompt.
+for _ in $(seq 1 8); do
+  virsh send-key "$NAME" KEY_SPACE >/dev/null 2>&1 || break
+  sleep 1
+done
+
+# Optional GPU attach: hyprtomic-vypr-setup lists the usable cards (alone in
+# their IOMMU group, boot GPU excluded) and attaches them as managed
+# hostdevs; the --gpu option here is forwarded to it when set explicitly.
+if [ "$GPU" != "ask" ] && [ "$GPU" != "none" ]; then
+  msg "Attaching GPU $GPU via hyprtomic-vypr-setup ..."
+  if [ "$YES" = 1 ]; then
+    hyprtomic-vypr-setup --vm "$NAME" --gpu "$GPU" --yes
+  else
+    hyprtomic-vypr-setup --vm "$NAME" --gpu "$GPU"
+  fi
+fi
+
+msg
+msg "Done. Next steps:"
+msg "  1. finish the Windows installation over the console (SPICE)."
+msg "  2. run: hyprtomic-vypr-setup --vm $NAME"
+msg "     (domain XML edits, pairing CD, GPU attach, guest power settings)"

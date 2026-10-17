@@ -1,0 +1,90 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    # Weekly cache refresh (Sunday 18:00 UTC = Monday 03:00 JST).
+    - cron: "0 18 * * 0"
+
+permissions:
+  contents: read
+
+env:
+  CACHIX_CACHE_NAME: ${{ secrets.CACHIX_CACHE_NAME }}
+  CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
+
+jobs:
+  discover:
+    name: discover hosts
+    runs-on: ubuntu-latest
+    outputs:
+      hosts: ${{ steps.list.outputs.hosts }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+
+      - name: List nixosConfigurations
+        id: list
+        run: |
+          echo "hosts=$(nix eval --json .#nixosConfigurations --apply builtins.attrNames)" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: build ${{ matrix.host }}
+    needs: discover
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        host: ${{ fromJSON(needs.discover.outputs.hosts) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+
+      # Pushes every store path this job builds; skip cleanly when the repo
+      # has no Cachix secrets configured yet (see the README).
+      - name: Set up Cachix
+        if: env.CACHIX_AUTH_TOKEN != ''
+        uses: cachix/cachix-action@v16
+        with:
+          name: ${{ env.CACHIX_CACHE_NAME }}
+          authToken: ${{ env.CACHIX_AUTH_TOKEN }}
+
+      - name: Check formatting
+        run: nix fmt -- --check .
+
+      - name: Evaluate the system
+        run: |
+          nix eval --raw \
+            ".#nixosConfigurations.${{ matrix.host }}.config.system.build.toplevel.drvPath" \
+            > /dev/null
+
+      - name: Build the system
+        run: |
+          nix build -L --no-link \
+            ".#nixosConfigurations.${{ matrix.host }}.config.system.build.toplevel"
+
+      - name: Build the custom packages
+        run: |
+          nix build -L --no-link \
+            .#packages.x86_64-linux.hyprbind \
+            .#packages.x86_64-linux.hypremoji \
+            .#packages.x86_64-linux.vypr \
+            .#packages.x86_64-linux.hyprtomic-vypr-scripts \
+            .#packages.x86_64-linux.fcitx5-mozkey-ibg \
+            .#packages.x86_64-linux.sddm-hyprtomic-theme \
+            .#packages.x86_64-linux.google-sans-flex \
+            .#packages.x86_64-linux.libfprint-cs9711 \
+            .#packages.x86_64-linux.resolve-icons

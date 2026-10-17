@@ -1,0 +1,308 @@
+#!/usr/bin/env bash
+# hyprtomic-vypr-setup — NixOS port of fedora-hyprtomic's `ujust vypr-setup`
+# (hyprtomic-vypr-setup).
+#
+# Prepares a libvirt VM for Vypr:
+#   1. domain XML edits — memfd/shared RAM, USB tablet removal, topoext CPU
+#      feature, emulated ich9 + pulseaudio sound, optional virtiofs share,
+#   2. the guest SSH key (~/.ssh/vypr-guest) and ~/.config/vypr/config
+#      (append-only; an existing config is never rewritten),
+#   3. the pairing CD (vypr-setup.exe + public key + vc_redist + pair.cmd)
+#      attached as a USB CD-ROM,
+#   4. an optional GPU attach as managed hostdev (card + its HDMI audio),
+#   5. the guest power settings over SSH (an idle guest stops repainting and
+#      freezes the host window).
+#
+# What differs from the Fedora script (all of it is declarative on NixOS):
+#   * the IOMMU kernel args (modules/environments/main-desktop/vfio.nix),
+#   * /etc/libvirt/qemu.conf + the libvirtd group + the daemon sockets
+#     (modules/system/virt.nix, modules/environments/main-desktop/vypr.nix),
+#   * the ostree swtpm-localca healing (systemd.tmpfiles in the same module).
+set -euo pipefail
+
+# vypr-gpu: the GPU/IOMMU helper library (gpu_devices, pci_boot_vga,
+# group_strays, gpu_audio_devices, hostdev_xml).
+# shellcheck source=/dev/null
+source "@VYPR_GPU_LIB@"
+
+VM="${VYPR_VM:-}"
+GPU="ask" # ask | none | auto | 0000:03:00.0
+SHARE=""
+YES=0
+
+msg() { printf '%s\n' "$*"; }
+die() {
+  printf 'error: %s\n' "$*" >&2
+  exit 1
+}
+
+usage() {
+  cat <<EOF
+usage: hyprtomic-vypr-setup [options]
+
+options:
+  --vm NAME              libvirt domain (default: ask / \$VYPR_VM)
+  --gpu ADDR|auto|none   attach a passed-through GPU (default: ask)
+  --share HOSTDIR[:TAG]  add a virtiofs share (target defaults to vyprhome)
+  --yes                  assume yes / pick defaults
+  -h, --help             show this help
+EOF
+}
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --vm)
+      VM="$2"
+      shift 2
+      ;;
+    --gpu)
+      GPU="$2"
+      shift 2
+      ;;
+    --share)
+      SHARE="$2"
+      shift 2
+      ;;
+    --yes)
+      YES=1
+      shift
+      ;;
+    -h | --help)
+      usage
+      exit 0
+      ;;
+    *) die "unknown option: $1 (see --help)" ;;
+  esac
+done
+
+command -v virsh >/dev/null || die "virsh not found"
+command -v python3 >/dev/null || die "python3 not found"
+
+# The launcher compares virsh state words against English (the same wrapper
+# vypr itself carries after the Fedora patches).
+virsh() { LC_ALL=C command virsh "$@"; }
+
+# ── 1. Pick the domain ──────────────────────────────────────────────
+if [ -z "$VM" ]; then
+  mapfile -t domains < <(virsh list --all --name | sed '/^$/d')
+  [ "${#domains[@]}" -gt 0 ] || die "no libvirt domains found; create one with hyprtomic-vypr-create-vm"
+  if [ "${#domains[@]}" -eq 1 ] || [ "$YES" = 1 ] || [ ! -t 0 ]; then
+    VM="${domains[0]}"
+  else
+    msg "Select the VM to configure:"
+    select d in "${domains[@]}"; do
+      VM="$d"
+      break
+    done
+  fi
+fi
+virsh dominfo "$VM" >/dev/null 2>&1 || die "no such libvirt domain: $VM"
+msg "Configuring domain: $VM"
+
+# ── 2. Domain XML edits ─────────────────────────────────────────────
+xml="$(mktemp)"
+trap 'rm -f "$xml"' EXIT
+virsh dumpxml "$VM" >"$xml"
+
+python3 - "$xml" "$SHARE" "$UID" <<'PY'
+import sys, xml.etree.ElementTree as ET
+
+path, share, uid = sys.argv[1:4]
+tree = ET.parse(path)
+root = tree.getroot()
+
+# Namespaces Vypr registers (harmless when unused).
+for prefix, uri in (
+    ("qemu", "http://libvirt.org/schemas/domain/qemu/1.0"),
+    ("lxc", "http://libvirt.org/schemas/domain/lxc/1.0"),
+    ("libosinfo", "http://libvirt.org/schemas/domain/libosinfo/1.0"),
+):
+    if f"xmlns:{prefix}" not in root.attrib:
+        root.set(f"xmlns:{prefix}", uri)
+
+# Legacy pre-0.5 shmem device (the 0.5 protocol reads the RAM memfd instead).
+for dev in root.findall("shmem"):
+    root.remove(dev)
+
+# Guest RAM as a shared memfd (Vypr reads the frames out of it).
+mb = root.find("memoryBacking")
+if mb is None:
+    mb = ET.SubElement(root, "memoryBacking")
+for tag in ("hugepages", "nosharepages", "locked", "source", "access", "allocation", "discard"):
+    for node in mb.findall(tag):
+        mb.remove(node)
+ET.SubElement(mb, "source", {"type": "memfd"})
+ET.SubElement(mb, "access", {"mode": "shared"})
+
+devices = root.find("devices")
+if devices is not None:
+    # The USB tablet breaks raw-input games; Vypr uses absolute coordinates.
+    for i in devices.findall("input"):
+        if i.get("type") == "tablet":
+            devices.remove(i)
+
+    # An emulated sound card so the guest has audio (pulseaudio backend).
+    if devices.find("sound") is None:
+        snd = ET.SubElement(devices, "sound", {"model": "ich9"})
+        ET.SubElement(snd, "audio", {
+            "id": "1",
+            "type": "pulseaudio",
+            "serverName": f"/run/user/{uid}/pulse/native",
+        })
+
+    # Optional virtiofs share (host dir + tag).
+    if share:
+        host_dir, _, tag = share.partition(":")
+        tag = tag or "vyprhome"
+        fs = ET.SubElement(devices, "filesystem", {
+            "type": "mount",
+            "accessmode": "passthrough",
+        })
+        ET.SubElement(fs, "driver", {"type": "virtiofs"})
+        ET.SubElement(fs, "source", {"dir": host_dir})
+        ET.SubElement(fs, "target", {"dir": tag})
+
+# topoext (some Windows software expects it; harmless otherwise).
+cpu = root.find("cpu")
+if cpu is not None:
+    if not any(f.get("name") == "topoext" for f in cpu.findall("feature")):
+        ET.SubElement(cpu, "feature", {"policy": "require", "name": "topoext"})
+
+tree.write(path, encoding="unicode", xml_declaration=True)
+PY
+
+virsh define "$xml" >/dev/null
+msg "Domain XML updated (memfd shared RAM, tablet removed, topoext, ich9 sound${SHARE:+, virtiofs share})"
+
+# ── 3. Guest SSH key + Vypr config ──────────────────────────────────
+key="$HOME/.ssh/vypr-guest"
+if [ ! -f "$key" ]; then
+  ssh-keygen -t ed25519 -N '' -C vypr-guest -f "$key" >/dev/null
+  msg "Created $key"
+fi
+
+cfg="$HOME/.config/vypr/config"
+install -d "$(dirname "$cfg")"
+touch "$cfg"
+append_missing() { # KEY=VALUE, append-only
+  local k="${1%%=*}"
+  grep -q "^${k}=" "$cfg" 2>/dev/null || printf '%s\n' "$1" >>"$cfg"
+}
+append_missing "VM=\"$VM\""
+append_missing "GUEST=auto"
+# TODO(manual): the Windows account name for SSH/pairing (edit when needed).
+append_missing "GUEST_USER=User"
+append_missing "USE_PARSEC=1"
+append_missing "OPEN_ELEVATION=1"
+append_missing "SHUTDOWN_VM_ON_EXIT=1"
+append_missing "SHUTDOWN_GRACE=60"
+msg "Vypr config: $cfg (existing keys untouched)"
+
+# ── 4. Pairing CD ───────────────────────────────────────────────────
+transfer="$HOME/.local/share/vypr/guest-transfer"
+install -d "$transfer"
+setup_exe="${VYPR_SETUP_EXE:-/run/current-system/sw/share/vypr/vypr-setup.exe}"
+[ -f "$setup_exe" ] || setup_exe="$(command -v vypr >/dev/null && dirname "$(readlink -f "$(command -v vypr)")")/../share/vypr/vypr-setup.exe"
+[ -f "$setup_exe" ] || die "vypr-setup.exe not found (is the vypr package installed?)"
+cp -f "$setup_exe" "$transfer/vypr-setup.exe"
+cp -f "$key.pub" "$transfer/vypr-guest.pub"
+
+vc="$HOME/.local/share/vypr/vc_redist.x64.exe"
+if [ ! -f "$vc" ]; then
+  msg "Downloading the Visual C++ runtime for the guest ..."
+  curl -fL --retry 3 -o "$vc" https://aka.ms/vs/17/release/vc_redist.x64.exe ||
+    die "could not download vc_redist.x64.exe"
+fi
+cp -f "$vc" "$transfer/vc_redist.x64.exe"
+
+# pair.cmd: install the runtime, copy the public key to the clipboard, start
+# the installer (the same double-click flow as the Fedora pairing CD).
+{
+  printf '@echo off\r\n'
+  printf 'vc_redist.x64.exe /install /quiet /norestart\r\n'
+  printf 'clip < "%%~dp0vypr-guest.pub"\r\n'
+  printf 'echo 公開鍵をコピーしました。vypr-setup.exe に貼り付けてください。\r\n'
+  printf 'start "" "%%~dp0vypr-setup.exe"\r\n'
+} >"$transfer/pair.cmd"
+
+iso="$HOME/.local/share/vypr/vypr-pair.iso"
+xorriso -as mkisofs -quiet -o "$iso" -V VYPRPAIR -J -r "$transfer"
+msg "Pairing CD: $iso"
+
+# Attach (replace an older Vypr pairing CD when present) - live when running.
+attach_cdrom() {
+  local target="$1" live=()
+  virsh domstate "$VM" | grep -qi running && live=(--live)
+  virsh attach-disk "$VM" "$iso" "$target" --type cdrom --targetbus usb --config "${live[@]}" >/dev/null 2>&1
+}
+if ! attach_cdrom sdb; then
+  attach_cdrom sdc || msg "warning: could not hot-attach the pairing CD (attach it via virt-manager)"
+fi
+msg "Pairing CD attached as a USB CD-ROM"
+
+# ── 5. Optional GPU attach ──────────────────────────────────────────
+if [ "$GPU" != "none" ] && ! virsh dumpxml "$VM" | grep -q '<hostdev'; then
+  candidates=()
+  while IFS= read -r dev; do
+    [ -n "$dev" ] || continue
+    [ "$(pci_boot_vga "$dev")" = "1" ] && continue
+    [ -n "$(group_strays "$dev")" ] && continue
+    candidates+=("$dev")
+  done < <(gpu_devices)
+
+  if [ "${#candidates[@]}" -gt 0 ]; then
+    addr=""
+    case "$GPU" in
+      auto) addr="${candidates[0]}" ;;
+      ask)
+        if [ "$YES" = 1 ] || [ ! -t 0 ]; then
+          addr="${candidates[0]}"
+        else
+          msg "Attachable GPUs (alone in their IOMMU group, boot GPU excluded):"
+          select c in "${candidates[@]}"; do
+            addr="$c"
+            break
+          done
+        fi
+        ;;
+      *) addr="$GPU" ;;
+    esac
+    if [ -n "$addr" ]; then
+      dev_xml="$(mktemp)"
+      hostdev_xml "$addr" >"$dev_xml"
+      virsh attach-device "$VM" "$dev_xml" --config >/dev/null
+      for audio in $(gpu_audio_devices "$addr"); do
+        hostdev_xml "$audio" >"$dev_xml"
+        virsh attach-device "$VM" "$dev_xml" --config >/dev/null
+      done
+      rm -f "$dev_xml"
+      msg "Attached $addr (+ its audio function) as a managed hostdev (takes effect next boot)"
+    fi
+  else
+    msg "No attachable GPU found (alone in its IOMMU group); skipping"
+  fi
+fi
+
+# ── 6. Guest power settings ─────────────────────────────────────────
+guest_user="$(sed -n 's/^GUEST_USER=//p' "$cfg" | tail -1 | tr -d '"')"
+guest_ip="$(virsh domifaddr "$VM" --source lease 2>/dev/null | awk '/ipv4/ {print $4}' | cut -d/ -f1 | head -1)"
+if [ -n "$guest_ip" ]; then
+  if ssh -i "$key" -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new -o IdentityAgent=none \
+    "${guest_user:-User}@$guest_ip" 'exit 0' 2>/dev/null; then
+    ssh -i "$key" -o IdentityAgent=none "${guest_user:-User}@$guest_ip" \
+      'powercfg /change monitor-timeout-ac 0 & powercfg /change monitor-timeout-dc 0 & powercfg /change standby-timeout-ac 0 & powercfg /change standby-timeout-dc 0 & powercfg /h off' ||
+      msg "warning: could not apply the guest power settings"
+    msg "Guest power settings applied (screen/sleep timeouts off, hibernation off)"
+  else
+    msg "Guest SSH not reachable yet - after pairing/reboot run hyprtomic-vypr-setup again."
+  fi
+else
+  msg "No guest IP yet (VM not running / Windows not installed); re-run after pairing."
+fi
+
+msg
+msg "Next steps:"
+msg "  * console:     virt-manager --connect qemu:///system --show-domain-console $VM"
+msg "  * in Windows:  run pair.cmd from the Vypr pair CD, paste the key into vypr-setup.exe, reboot"
+msg "  * register apps: vypr detect   (or: vypr add myapp 'C:\\path\\app.lnk')"
+msg "  * health check: vypr doctor"
