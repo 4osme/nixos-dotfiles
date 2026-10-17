@@ -13,6 +13,13 @@ final: prev: {
   libfprint-cs9711 = final.callPackage ../pkgs/libfprint-cs9711 { };
   resolve-icons = final.callPackage ../pkgs/resolve-icons { };
 
+  # nixpkgs 26.05's tela-circle-icon-theme ships a few dangling XSI alias
+  # symlinks and the fixup check rejects the build (so it is not on
+  # cache.nixos.org either). The aliases are cosmetic; skip the check.
+  tela-circle-icon-theme = prev.tela-circle-icon-theme.overrideAttrs (_: {
+    dontCheckForBrokenSymlinks = true;
+  });
+
   # fedora-hyprtomic carries a quickshell fix for a SIGSEGV when the default
   # PipeWire sink is destroyed (files/system/patches/, from
   # files/gui-build/patches/ in the source repo). Apply it only while the
