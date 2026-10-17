@@ -121,6 +121,10 @@ fprintd-enroll                 # 指紋 (CS9711F) の登録
 - **fingerprint**: SDDM / hyprlock の PAM ゲート (空 Enter で指紋) はそのまま移植。
   main-desktop は CS9711 対応のため `pkgs.libfprint-cs9711` で `libfprint` を
   差し替え (COPR `cwt/libfprint-cs9711` 相当)。
+- **Sunshine (JIS)**: ../sunshine-nix のJISキーボード対応パッチを統合し、
+  main-desktop でユーザーサービスとして自動起動 (`home/sunshine.nix`)。
+  ディスプレイプロファイル連携 (`host.lua` + `hypr-stream-display.py`) は
+  従来どおり。
 
 ## 独自パッケージの出典
 
@@ -133,6 +137,7 @@ fprintd-enroll                 # 指紋 (CS9711F) の登録
 | `sddm-hyprtomic-theme` | Keyitdev/sddm-astronaut-theme + `files/sddm-theme` | GPL-3.0 |
 | `google-sans-flex` | ririko66z/dots-hyprland COPR RPM | OFL。Fedora の gui-04-fonts.sh と同じ成果物 |
 | `libfprint-cs9711` 1.94.10 | archeYR/libfprint-CS9711 | LGPL-2.1+。1500ms リトライパッチ付き |
+| `sunshine` (JIS) | ../sunshine-nix から vendored (`pkgs/sunshine/`) | GPL-3.0-or-later + MIT (詳細と出典は `pkgs/sunshine/README.md`)。`main-desktop` でユーザーサービスとして起動 |
 | quickshell パッチ | fedora-hyprtomic `files/gui-build/patches/` | upstream 修正が入ったら自動スキップ |
 
 ## CI / バイナリキャッシュ

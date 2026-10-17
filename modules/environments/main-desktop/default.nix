@@ -6,6 +6,7 @@
     ./vfio.nix
     ./vypr.nix
     ./fingerprint.nix
+    ./sunshine.nix
   ];
 
   # Machine specifics of the source "main" desktop (Intel Core Ultra 200+

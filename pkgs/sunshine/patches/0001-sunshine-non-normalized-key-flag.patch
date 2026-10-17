@@ -1,0 +1,23 @@
+From: underdone
+Subject: [PATCH] virtualhid: honour the non-normalized key code flag on the uinput path
+
+Moonlight marks JIS-specific keys (yen, ro, kana, henkan, muhenkan) with
+SS_KBE_FLAG_NON_NORMALIZED so the host can translate them by physical
+position. The virtualhid path already forwarded the flag; the uinput
+fallback path dropped it, so those keys never reached libvirtualhid as
+layout-native key codes.
+
+This patch is part of a JIS (Japanese keyboard) support change set.
+License: GPL-3.0-or-later, matching LizardByte/Sunshine.
+
+--- a/src/platform/virtualhid_input.cpp
++++ b/src/platform/virtualhid_input.cpp
+@@ -314,7 +314,7 @@ namespace platf::virtualhid {
+       event.uses_normalized_key_code = (static_cast<std::byte>(flags) & static_cast<std::byte>(SS_KBE_FLAG_NON_NORMALIZED)) == std::byte {};
+       event.prefer_native_scan_code = config::input.always_send_scancodes;
+ #else
+-      (void) flags;
++      event.uses_normalized_key_code = (static_cast<std::byte>(flags) & static_cast<std::byte>(SS_KBE_FLAG_NON_NORMALIZED)) == std::byte {};
+ #endif
+       return event;
+     }

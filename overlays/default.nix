@@ -20,6 +20,21 @@ final: prev: {
     dontCheckForBrokenSymlinks = true;
   });
 
+  # Sunshine with JIS keyboard support — vendored from the sunshine-nix tree
+  # (../sunshine-nix → pkgs/sunshine/, see the license notes there). Upstream
+  # has not merged the JIS PRs yet, so the patches apply on top of the nixpkgs
+  # version (2026.914.233613); rebase 0003 against the new submodule pin when
+  # nixpkgs bumps Sunshine.
+  sunshine = prev.sunshine.overrideAttrs (old: {
+    patches = (old.patches or [ ]) ++ [
+      ../pkgs/sunshine/patches/0001-sunshine-non-normalized-key-flag.patch
+      ../pkgs/sunshine/patches/0002-sunshine-wayland-retry.patch
+    ];
+    postPatch = (old.postPatch or "") + ''
+      patch -d third-party/libvirtualhid -p1 < ${../pkgs/sunshine/patches/0003-libvirtualhid-jis-keyboard-mapping.patch}
+    '';
+  });
+
   # fedora-hyprtomic carries a quickshell fix for a SIGSEGV when the default
   # PipeWire sink is destroyed (files/system/patches/, from
   # files/gui-build/patches/ in the source repo). Apply it only while the

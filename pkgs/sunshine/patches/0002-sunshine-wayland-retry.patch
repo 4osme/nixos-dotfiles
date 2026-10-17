@@ -1,0 +1,33 @@
+From: underdone
+Subject: [PATCH] wayland: retry layout validation instead of caching the first failure
+
+Sunshine starts at boot for SDDM capture, before the user compositor
+creates its Wayland socket. Caching that first failure left absolute
+mouse input mapped to the raw KMS offsets (offset by any scaled or
+rotated monitor) until the service was restarted. Retry per call so the
+next stream after login picks up the Wayland layout.
+
+Not JIS specific, but recommended together with the JIS patches on a
+Wayland/Hyprland host.
+License: GPL-3.0-or-later, matching LizardByte/Sunshine.
+
+--- a/src/platform/linux/wayland.cpp
++++ b/src/platform/linux/wayland.cpp
+@@ -634,7 +634,16 @@ namespace wl {
+    * @brief Initialize Wayland registry interfaces required for capture.
+    */
+   int init() {
+-    static bool validated = validate();
++    // Retry until the session's Wayland socket exists. Sunshine starts at
++    // boot for SDDM capture, before the user compositor creates its socket;
++    // caching that first failure left absolute mouse input mapped to the raw
++    // KMS offsets (offset by any scaled/rotated monitor) until the service
++    // was restarted. Retrying per call lets the next stream after login pick
++    // up the Wayland layout.
++    static bool validated = false;
++    if (!validated) {
++      validated = validate();
++    }
+ 
+     return !validated;
+   }

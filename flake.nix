@@ -102,6 +102,7 @@
           google-sans-flex
           libfprint-cs9711
           resolve-icons
+          sunshine
           ;
       });
 

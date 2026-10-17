@@ -1,5 +1,5 @@
 # Per-user HyprTomic desktop: the package set the hyprtomic-gui container
-# used to carry, the dotfile sync tool and the small user services.
+# used to carry, Home Manager-managed dotfiles and the small user services.
 {
   pkgs,
   inputs,
@@ -14,7 +14,8 @@
     ./services.nix
     ./dotfiles.nix
     ./theme.nix
-  ];
+  ]
+  ++ lib.optional (hostName == "main-desktop") ./sunshine.nix;
 
   home.username = "underdone";
   home.homeDirectory = "/home/underdone";

@@ -1,0 +1,68 @@
+From: underdone
+Subject: [PATCH] linux/uhid: map JIS-specific key codes by physical position
+
+The Linux uhid backend translated key codes without looking at the
+SS_KBE_FLAG_NON_NORMALIZED flag, so JIS-specific keys were mapped by
+their US position instead of their Japanese layout position:
+
+  0xDC -> KEY_YEN   (JIS yen / backslash)
+  0xE2 -> KEY_RO    (JIS ro)
+  0x15 -> KEY_KATAKANAHIRAGANA (kana)
+  0x1C -> KEY_HENKAN
+  0x1D -> KEY_MUHENKAN
+
+With the flag set (i.e. layout-native key code), those key codes now map
+to the correct evdev codes. Non-JIS layouts are unaffected because the
+new cases only trigger when the sender flagged the key as non-normalized.
+
+License: MIT. The patched file (src/platform/linux/uhid_backend.cpp) is a
+non-driver backend of LizardByte/libvirtualhid and is MIT licensed (see
+that repository's LICENSE.md and LICENSES/MIT.md). Keep those notices
+intact if this patch is redistributed as part of a libvirtualhid fork.
+
+--- a/src/platform/linux/uhid_backend.cpp
++++ b/src/platform/linux/uhid_backend.cpp
+@@ -993,8 +993,21 @@ namespace lvh::detail {
+       return it->second;
+     }
+ 
+-    int key_code_to_linux(KeyboardKeyCode key_code) {
+-      static constexpr std::array<std::pair<KeyboardKeyCode, int>, 47> special_keys {{
++    int key_code_to_linux(KeyboardKeyCode key_code, bool uses_normalized_key_code) {
++      // Moonlight flagged the keycode as layout-native (SS_KBE_FLAG_NON_NORMALIZED),
++      // so it names the key by its position on the sender's JIS layout.
++      if (!uses_normalized_key_code) {
++        switch (key_code) {
++          case 0xDC:
++            return KEY_YEN;  // JIS yen / backslash
++          case 0xE2:
++            return KEY_RO;  // JIS ro
++          default:
++            break;
++        }
++      }
++
++      static constexpr std::array<std::pair<KeyboardKeyCode, int>, 50> special_keys {{
+         {0x08, KEY_BACKSPACE},
+         {0x09, KEY_TAB},
+         {0x0D, KEY_ENTER},
+@@ -1005,7 +1018,10 @@ namespace lvh::detail {
+         {0x12, KEY_LEFTALT},
+         {0xA4, KEY_LEFTALT},
+         {0x14, KEY_CAPSLOCK},
++        {0x15, KEY_KATAKANAHIRAGANA},
+         {0x1B, KEY_ESC},
++        {0x1C, KEY_HENKAN},
++        {0x1D, KEY_MUHENKAN},
+         {0x20, KEY_SPACE},
+         {0x21, KEY_PAGEUP},
+         {0x22, KEY_PAGEDOWN},
+@@ -1942,7 +1958,7 @@ namespace lvh::detail {
+ 
+     private:
+       OperationStatus emit_keyboard_event(const KeyboardEvent &event) {
+-        const auto linux_key = key_code_to_linux(event.key_code);
++        const auto linux_key = key_code_to_linux(event.key_code, event.uses_normalized_key_code);
+         if (linux_key < 0) {
+           return OperationStatus::failure(ErrorCode::invalid_argument, "keyboard key code is not supported by the Linux backend");
+         }
