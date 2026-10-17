@@ -36,6 +36,10 @@ jobs:
             exit 0
           fi
 
+          # Follow the repository's default branch (master today, main if it
+          # is ever renamed).
+          base=$(gh repo view --json defaultBranchRef -q .defaultBranchRef.name)
+
           branch=flake-update
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -47,7 +51,7 @@ jobs:
 
           if ! gh pr view "$branch" --json number >/dev/null 2>&1; then
             gh pr create \
-              --base main \
+              --base "$base" \
               --head "$branch" \
               --title "chore(flake): update inputs ($(date -u +%F))" \
               --body "Automated weekly \`nix flake update\`.

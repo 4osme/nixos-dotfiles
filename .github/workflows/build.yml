@@ -2,7 +2,9 @@ name: build
 
 on:
   push:
-    branches: [main]
+    # The repository default branch is master; main is listed so a future
+    # rename to main keeps working without touching this file again.
+    branches: [master, main]
   pull_request:
   workflow_dispatch:
   schedule:
@@ -54,9 +56,10 @@ jobs:
             accept-flake-config = true
 
       # Pushes every store path this job builds; skip cleanly when the repo
-      # has no Cachix secrets configured yet (see the README).
+      # has no Cachix secrets configured yet (see the README). Both secrets
+      # are required: cachix-action v16 throws when `name` is empty.
       - name: Set up Cachix
-        if: env.CACHIX_AUTH_TOKEN != ''
+        if: env.CACHIX_CACHE_NAME != '' && env.CACHIX_AUTH_TOKEN != ''
         uses: cachix/cachix-action@v16
         with:
           name: ${{ env.CACHIX_CACHE_NAME }}
