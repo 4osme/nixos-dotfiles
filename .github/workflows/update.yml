@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   update:
-    name: nix flake update -> PR -> auto-merge
+    name: nix flake update -> PR
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -62,9 +62,7 @@ jobs:
               --title "chore(flake): update inputs ($(date -u +%F))" \
               --body "Automated weekly \`nix flake update\`.
 
-          The build workflow validates the update; auto-merge merges it as soon as
-          the required checks pass (enable \`Allow auto-merge\` and the required
-          status checks in the repository settings, see the README)."
+          The branch is force-refreshed with the current lock every week until it
+          is merged. Review the diff and merge by hand once the required build
+          check passes (branch protection enforces it)."
           fi
-
-          gh pr merge "$branch" --auto --squash --delete-branch
