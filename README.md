@@ -1,25 +1,6 @@
-# dotfiles — HyprTomic NixOS
+# NixOS dotfiles
 
-`j7b3y/fedora-hyprtomic/` のシステム (Fedora Atomic ホスト + Arch distrobox GUI) を
-**NixOS + Home Manager** へ移植した dotfiles です。要件と移行内容の仕様は
-[AGENTS.md](./AGENTS.md) を参照してください。
-
-## 構成
-
-| パス | 役割 |
-|---|---|
-| `flake.nix` | 入力 (nixpkgs 26.05 / home-manager / nix-cachyos-kernel) と `nixosConfigurations` |
-| `hosts/main-desktop/` | main-desktop 環境 (このマシン)。`storage.nix` (要手動定義) / `hardware-configuration.nix` (インストール時に生成) |
-| `modules/system/` | OS 基本層: boot (systemd-boot + XBOOTLDR), kernel, nix, networking/BT, locale/IME, audio, users, sddm, fonts, portals, flatpak, distrobox, KVM, security, hardware |
-| `modules/desktop/` | Hyprland セッション (programs.hyprland + uwsm) |
-| `modules/environments/main-desktop/` | Intel GPU (i915 出禁/xe), NPU, VFIO (Arc B580), Vypr, CS9711F ドライバ |
-| `home/` | Home Manager: ツール類, zsh, ユーザーサービス, dotfiles sync ツール |
-| `overlays/` + `pkgs/` | 独自ビルド: hyprbind, hypremoji, Vypr, mozkey, SDDM theme, Google Sans Flex, libfprint-cs9711, quickshell パッチ |
-| `files/home/` | `$HOME` へ配る dotfiles (fedora-hyprtomic の `/etc/skel` 相当) |
-| `files/home-<host>/` | ホスト別 dotfiles オーバーレイ (例: main-desktop の緩和した hypridle) |
-| `files/system/` | PAM ゲート, Vypr ヘルパー, quickshell パッチなどの素材 |
-| `.github/workflows/` | CI: ビルド + Cachix、`nix flake update` → PR → 自動マージ |
-
+NixOSとHomeManagerを使ったホストの宣言的なシステム管理とdistrobox/Vyprを使った非宣言的なゲスト環境のハイブリッド型を目指したdotfiles。
 
 ## 独自パッケージの出典
 
@@ -36,8 +17,3 @@
 | `sunshine` (JIS) | ../sunshine-nix から vendored (`pkgs/sunshine/`) | GPL-3.0-or-later + MIT (詳細と出典は `pkgs/sunshine/README.md`)。`main-desktop` でユーザーサービスとして起動 |
 | quickshell パッチ | fedora-hyprtomic `files/gui-build/patches/` | upstream 修正が入ったら自動スキップ |
 
-## 今後の作業
-
-- `dell-laptop` 環境モジュール (tpm2+LUKS, tailsale, edid, waybar バッテリー等)
-- mozkey の Bazel ビルドが現実的になれば prebuilt から切替
-- sigma-file-manager のソースビルド (cargo-tauri.hook) への切替検討
