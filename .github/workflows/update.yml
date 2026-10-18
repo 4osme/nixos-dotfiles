@@ -47,6 +47,12 @@ jobs:
           git checkout -B "$branch"
           git add flake.lock
           git commit -m "chore(flake): update inputs ($(date -u +%F))"
+
+          # The runner checks out a single branch, so the remote-tracking ref
+          # for $branch may be missing; --force-with-lease would then read it as
+          # "must not exist" and reject the push as "stale info". Fetch the
+          # branch first, tolerating its absence.
+          git fetch origin "+refs/heads/$branch:refs/remotes/origin/$branch" || true
           git push --force-with-lease -u origin "$branch"
 
           if ! gh pr view "$branch" --json number >/dev/null 2>&1; then
