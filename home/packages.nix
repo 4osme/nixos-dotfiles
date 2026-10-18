@@ -30,7 +30,7 @@
     rofi
     nwg-displays
     haruna
-    nemo
+    sigma-file-manager # default file manager (nemo dropped, AGENTS.md)
     file-roller
     pavucontrol
     wl-clipboard

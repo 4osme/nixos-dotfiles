@@ -12,6 +12,7 @@ final: prev: {
   google-sans-flex = final.callPackage ../pkgs/google-sans-flex { };
   libfprint-cs9711 = final.callPackage ../pkgs/libfprint-cs9711 { };
   resolve-icons = final.callPackage ../pkgs/resolve-icons { };
+  sigma-file-manager = final.callPackage ../pkgs/sigma-file-manager { };
 
   # nixpkgs 26.05's tela-circle-icon-theme ships a few dangling XSI alias
   # symlinks and the fixup check rejects the build (so it is not on

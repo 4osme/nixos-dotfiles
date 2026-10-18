@@ -30,7 +30,7 @@ hl.monitor({
 
 -- Variables
 local terminal    = "ghostty"
-local fileManager = "nemo"
+local fileManager = "sigma-file-manager"
 local menu        = "qs -c ii ipc call launcher toggle"
 local mainMod     = "SUPER"
 
@@ -408,14 +408,6 @@ hl.window_rule({
     float   = true,
     size    = "(monitor_w*0.3) (monitor_h*0.35)",
     center  = true,
-    opacity = 0.9,
-})
-
-hl.window_rule({
-    name    = "float-nemo",
-    match   = { class = "nemo" },
-    float   = true,
-    size    = "(monitor_w*0.3) (monitor_h*0.35)",
     opacity = 0.9,
 })
 

@@ -28,4 +28,11 @@
     XCURSOR_THEME = "Bibata-Modern-Classic";
     XCURSOR_SIZE = "36";
   };
+
+  # sigma-file-manager is the default handler for directories
+  # (AGENTS.md: nemo replaced by sigma-file-manager).
+  xdg.mimeApps = {
+    enable = true;
+    defaultApplications."inode/directory" = "sigma-file-manager.desktop";
+  };
 }

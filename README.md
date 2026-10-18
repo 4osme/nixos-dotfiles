@@ -94,6 +94,9 @@ fprintd-enroll                 # 指紋 (CS9711F) の登録
   実行。`hyprtomic-gui-shell` / `hyprtomic-distrobox-apps` は不要になり、
   ランチャーは Host (ネイティブ) と Flatpak の 2 ソースに整理 (`Launcher.qml`
   の `guiContainer` フォールバックを Host に変更)。
+- **ファイルマネージャー**: `sigma-file-manager` (Tauri、公式debを再パッケージ)
+  を `SUPER+E` と `inode/directory` のデフォルトに採用し、nemo は除外
+  (AGENTS.md の検討事項)。アーカイブ用に file-roller は残置。
 - **dotfiles は Home Manager 管理 / テーマ固定**: `files/home` を
   `xdg.configFile`/`home.file` でリンク (`hyprtomic-config-sync` 廃止)。
   `apply-theme.sh` とテーマ切替 UI も廃止し、**md3-amethyst 固定**
@@ -137,6 +140,7 @@ fprintd-enroll                 # 指紋 (CS9711F) の登録
 | `sddm-hyprtomic-theme` | Keyitdev/sddm-astronaut-theme + `files/sddm-theme` | GPL-3.0 |
 | `google-sans-flex` | ririko66z/dots-hyprland COPR RPM | OFL。Fedora の gui-04-fonts.sh と同じ成果物 |
 | `libfprint-cs9711` 1.94.10 | archeYR/libfprint-CS9711 | LGPL-2.1+。1500ms リトライパッチ付き |
+| `sigma-file-manager` 2.2.0 | 公式debを再パッケージ (`pkgs/sigma-file-manager`) | GPL-3.0-or-later。Tauri製バイナリを autoPatchelf。デフォルトFM (nemo置換) |
 | `sunshine` (JIS) | ../sunshine-nix から vendored (`pkgs/sunshine/`) | GPL-3.0-or-later + MIT (詳細と出典は `pkgs/sunshine/README.md`)。`main-desktop` でユーザーサービスとして起動 |
 | quickshell パッチ | fedora-hyprtomic `files/gui-build/patches/` | upstream 修正が入ったら自動スキップ |
 
@@ -152,6 +156,6 @@ fprintd-enroll                 # 指紋 (CS9711F) の登録
 ## 今後の作業
 
 - `dell-laptop` 環境モジュール (tpm2+LUKS, tailsale, edid, waybar バッテリー等)
-- FileManager の sigma-file-manager 移行 (検討中)
 - Flatpak 併用の最終判断 (vesktop / Mission Center / Bitwarden / Chrome / EasyEffects)
 - mozkey の Bazel ビルドが現実的になれば prebuilt から切替
+- sigma-file-manager のソースビルド (cargo-tauri.hook) への切替検討
