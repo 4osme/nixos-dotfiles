@@ -36,7 +36,7 @@
 }:
 {
   fileSystems."/" = {
-    device = "/dev/disk/by-uuid/REPLACE-ROOT-BTRFS-UUID"; # TODO(manual)
+    device = "/dev/disk/by-label/nixroot"; # TODO(manual)
     fsType = "btrfs";
     options = [
       "subvol=@"
@@ -46,7 +46,7 @@
   };
 
   fileSystems."/home" = {
-    device = "/dev/disk/by-uuid/REPLACE-ROOT-BTRFS-UUID"; # TODO(manual) — same btrfs
+    device = "/dev/disk/by-label/nixhome"; # TODO(manual) — same btrfs
     fsType = "btrfs";
     options = [
       "subvol=@home"
@@ -56,13 +56,13 @@
   };
 
   fileSystems."/boot" = {
-    device = "/dev/disk/by-uuid/REPLACE-BOOT-XFS-UUID"; # TODO(manual)
+    device = "/dev/disk/by-label/nixboot"; # TODO(manual)
     fsType = "xfs";
     options = [ "defaults" ];
   };
 
   fileSystems."/efi" = {
-    device = "/dev/disk/by-uuid/REPLACE-EFI-VFAT-UUID"; # TODO(manual)
+    device = "/dev/disk/by-label/nixefi; # TODO(manual)
     fsType = "vfat";
     options = [
       "umask=0077"
@@ -86,9 +86,9 @@
   # `systemctl suspend-then-hibernate` (the hypridle listener).
   swapDevices = [
     {
-      device = "/dev/disk/by-uuid/REPLACE-SWAP-UUID"; # TODO(manual)
+      device = "/dev/disk/by-label/swapart";
       priority = 10; # below zram (zramSwap in modules/system/boot.nix)
     }
   ];
-  boot.resumeDevice = lib.mkDefault "/dev/disk/by-uuid/REPLACE-SWAP-UUID"; # TODO(manual)
+  boot.resumeDevice = lib.mkDefault "/dev/disk/by-uuid/swapart"; 
 }
