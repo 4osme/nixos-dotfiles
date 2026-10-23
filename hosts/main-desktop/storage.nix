@@ -62,7 +62,7 @@
   };
 
   fileSystems."/efi" = {
-    device = "/dev/disk/by-label/nixefi; # TODO(manual)
+    device = "/dev/disk/by-label/nixefi"; # TODO(manual)
     fsType = "vfat";
     options = [
       "umask=0077"
@@ -90,5 +90,5 @@
       priority = 10; # below zram (zramSwap in modules/system/boot.nix)
     }
   ];
-  boot.resumeDevice = lib.mkDefault "/dev/disk/by-uuid/swapart"; 
+  boot.resumeDevice = lib.mkDefault "/dev/disk/by-uuid/swapart";
 }
