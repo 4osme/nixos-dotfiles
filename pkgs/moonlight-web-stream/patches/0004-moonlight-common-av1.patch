@@ -1,0 +1,108 @@
+diff --git a/src/stream/proto/mod.rs b/src/stream/proto/mod.rs
+--- a/src/stream/proto/mod.rs
++++ b/src/stream/proto/mod.rs
+@@ -55,6 +55,83 @@
+     },
+ };
+ 
++fn select_av1_format(host: ServerCodecModeSupport, client: VideoFormats) -> Option<VideoFormat> {
++    [
++        (
++            ServerCodecModeSupport::AV1_HIGH10_444,
++            VideoFormats::AV1_HIGH10_444,
++            VideoFormat::Av1High10_444,
++        ),
++        (
++            ServerCodecModeSupport::AV1_MAIN10,
++            VideoFormats::AV1_MAIN10,
++            VideoFormat::Av1Main10,
++        ),
++        (
++            ServerCodecModeSupport::AV1_HIGH8_444,
++            VideoFormats::AV1_HIGH8_444,
++            VideoFormat::Av1High8_444,
++        ),
++        (
++            ServerCodecModeSupport::AV1_MAIN8,
++            VideoFormats::AV1_MAIN8,
++            VideoFormat::Av1Main8,
++        ),
++    ]
++    .into_iter()
++    .find_map(|(capability, supported, format)| {
++        (host.contains(capability) && client.contains(supported)).then_some(format)
++    })
++}
++
++#[cfg(test)]
++mod av1_selection_tests {
++    use super::*;
++
++    #[test]
++    fn selects_av1_when_h264_is_also_allowed() {
++        assert_eq!(
++            select_av1_format(
++                ServerCodecModeSupport::AV1_MAIN8,
++                VideoFormats::AV1_MAIN8 | VideoFormats::H264,
++            ),
++            Some(VideoFormat::Av1Main8)
++        );
++    }
++
++    #[test]
++    fn requires_a_matching_host_and_client_profile() {
++        assert_eq!(
++            select_av1_format(ServerCodecModeSupport::empty(), VideoFormats::AV1_MAIN8),
++            None
++        );
++        assert_eq!(
++            select_av1_format(ServerCodecModeSupport::AV1_MAIN8, VideoFormats::H264),
++            None
++        );
++        assert_eq!(
++            select_av1_format(ServerCodecModeSupport::AV1_MAIN10, VideoFormats::AV1_MAIN8),
++            None
++        );
++    }
++
++    #[test]
++    fn prefers_ten_bit_but_falls_back_to_mutual_eight_bit() {
++        let client = VideoFormats::AV1_MAIN8 | VideoFormats::AV1_MAIN10;
++        assert_eq!(
++            select_av1_format(
++                ServerCodecModeSupport::AV1_MAIN8 | ServerCodecModeSupport::AV1_MAIN10,
++                client,
++            ),
++            Some(VideoFormat::Av1Main10)
++        );
++        assert_eq!(
++            select_av1_format(ServerCodecModeSupport::AV1_MAIN8, client),
++            Some(VideoFormat::Av1Main8)
++        );
++    }
++}
++
+ // TODO: implement apollo extensions: https://github.com/ClassicOldSong/moonlight-common-c/commit/84af637de7718d1bb390332f0e37a4c6d59e6b78
+ // Detect apollo based on: if we have a "Permission" field in the xml?
+ // - https://github.com/LizardByte/Sunshine/blob/c9e0bb864ed263da6dd5c2fff5541c268f94cfaf/src/nvhttp.cpp#L679-L770
+@@ -958,14 +1035,18 @@
+         };
+ 
+         // -- Select Video Format
+-        // Av1 is not supported in this implementation currently
+         // See https://github.com/moonlight-stream/moonlight-common-c/blob/7b026e77be62175104640e7e722b758df6d3d0d7/src/RtspConnection.c#L1090-L1136
+         let negotiated_video_format;
+ 
+-        if self
++        if let Some(format) = select_av1_format(
++            self.client_config.server_codec_mode_support,
++            self.client_settings.supported_video_formats,
++        ) {
++            negotiated_video_format = format;
++        } else if self
+             .client_config
+             .server_codec_mode_support
+             .intersects(ServerCodecModeSupport::MASK_HEVC)
+             && self
+                 .client_settings
+                 .supported_video_formats

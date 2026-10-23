@@ -3,10 +3,13 @@
 # overlay (overlays/default.nix overrides pkgs.sunshine). The patches target
 # Sunshine v2026.914.233613, the version in nixpkgs 26.05.
 #
-# The per-user service that starts it lives in home/sunshine.nix (imported
-# for main-desktop only), matching the Fedora setup where the streaming host
-# ran alongside the Hyprland session (see ~/.config/sunshine + host.lua).
+# The per-user unit that starts it lives in home/sunshine.nix (imported for
+# main-desktop only). It is intentionally not enabled at login: start it with
+# `sunshine-session start` together with the tunnel (cloudflared-tunnel).
 { pkgs, ... }:
 {
-  environment.systemPackages = [ pkgs.sunshine ];
+  environment.systemPackages = [
+    pkgs.sunshine
+    pkgs.cloudflared
+  ];
 }

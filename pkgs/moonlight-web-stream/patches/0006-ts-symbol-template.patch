@@ -1,0 +1,12 @@
+diff --git a/web/stream/video/video_decoder_pipe.ts b/web/stream/video/video_decoder_pipe.ts
+--- a/web/stream/video/video_decoder_pipe.ts
++++ b/web/stream/video/video_decoder_pipe.ts
+@@ -237,7 +237,7 @@
+ 
+         if (!this.config) {
+             this.errored = true
+-            this.logger?.debug(`Failed to setup VideoDecoder for codec ${setup.codec} because of missing config`)
++            this.logger?.debug(`Failed to setup VideoDecoder for codec ${String(setup.codec)} because of missing config`)
+             return
+         }
+         this.translator?.setBaseConfig(this.config)

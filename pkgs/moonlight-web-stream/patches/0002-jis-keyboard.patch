@@ -1,0 +1,900 @@
+diff --git a/README.md b/README.md
+index 137118a..dd93b0b 100644
+--- a/README.md
++++ b/README.md
+@@ -260,6 +260,49 @@ There are a few important things to be aware of when using WebSockets for stream
+     ```
+   - The decoder will be detected and used automatically.
+ 
++## Japanese keyboards
++
++The web client supports Japanese (JIS) keyboards. It sends the physical key
++positions to the host, so the **host has to use a Japanese keyboard layout**
++(e.g. `setxkbmap jp` or the equivalent setting of your desktop environment).
++
++The JIS specific keys (`ろ`, `¥`, `かな`, `変換`, `無変換`) are marked as
++"non normalized" and Sunshine needs the following upstream changes to translate
++them (none of them is released yet):
++
++- [LizardByte/Sunshine#5542](https://github.com/LizardByte/Sunshine/pull/5542)
++- [LizardByte/libvirtualhid#101](https://github.com/LizardByte/libvirtualhid/pull/101)
++
++Build Sunshine with both changes:
++
++```sh
++git clone --recursive https://github.com/LizardByte/Sunshine
++cd Sunshine
++
++# Sunshine side
++git fetch origin pull/5542/head:pr-5542
++git checkout pr-5542
++
++# libvirtualhid side (git submodule)
++cd third-party/libvirtualhid
++git fetch origin pull/101/head:pr-101
++git checkout pr-101
++cd ../..
++
++cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
++cmake --build build
++```
++
++If the build fails because the libvirtualhid version is too old, merge the PR
++branch on top of the current libvirtualhid master instead
++(`git checkout master && git merge pr-101`) or lower
++`LIBVIRTUALHID_MINIMUM_VERSION` in Sunshine's `CMakeLists.txt`.
++
++On released Sunshine versions (without those changes) the `ろ` key types `<>`
++and the `¥` key types `]`.
++
++The `半角/全角` key works without the Sunshine changes.
++
+ ## Config
+ The config file is under `server/config.json` relative to the executable.
+ Here are the most important settings for configuring Moonlight Web.
+diff --git a/tests/jis/input.test.ts b/tests/jis/input.test.ts
+new file mode 100644
+index 0000000..d643aa9
+--- /dev/null
++++ b/tests/jis/input.test.ts
+@@ -0,0 +1,137 @@
++import test from "node:test"
++import assert from "node:assert/strict"
++
++import { StreamKeys } from "../../web/api_bindings.ts"
++import { StreamInput } from "../../web/stream/input.ts"
++import { KeyAction } from "./stubs.mjs"
++
++function keyEvent(overrides: Record<string, unknown> = {}): KeyboardEvent {
++    return {
++        type: "keydown",
++        code: "",
++        key: "",
++        keyCode: 0,
++        isComposing: false,
++        repeat: false,
++        shiftKey: false,
++        ctrlKey: false,
++        altKey: false,
++        metaKey: false,
++        ...overrides,
++    } as unknown as KeyboardEvent
++}
++
++function setup() {
++    const sent: any[] = []
++    const logs: string[] = []
++
++    const input = new StreamInput()
++    input.setControlStream({
++        send: (packet: any) => sent.push(packet),
++        sendRaw: () => { },
++    } as any)
++    input.setLogger({ debug: (message: string) => logs.push(message) } as any)
++
++    return { input, sent, logs }
++}
++
++const jisDiag = (logs: string[]) => logs.filter(line => line.includes("JIS diag"))
++
++test("半角/全角 is sent as a single non normalized tap", () => {
++    const { input, sent, logs } = setup()
++
++    input.onKeyDown(keyEvent({ key: "Hankaku", code: "Backquote", keyCode: 0x15 }))
++
++    assert.equal(sent.length, 2, "must send exactly one down/up tap")
++    assert.equal(sent[0].data.action, KeyAction.Down)
++    assert.equal(sent[0].data.keyCode, StreamKeys.VK_OEM_3)
++    assert.equal(sent[0].data.flags.sunshineNonNormalized, true)
++    assert.equal(sent[1].data.action, KeyAction.Up)
++    assert.equal(sent[1].data.keyCode, StreamKeys.VK_OEM_3)
++    assert.equal(sent[1].data.flags.sunshineNonNormalized, true)
++
++    // The client IME often sends no keyup; receiving one must not send again.
++    input.onKeyUp(keyEvent({ key: "Hankaku", code: "Backquote", keyCode: 0x15 }))
++    assert.equal(sent.length, 2)
++
++    const diag = jisDiag(logs)
++    assert.equal(diag.length, 2, "down and up should both be diagnosed")
++    assert.ok(diag[0].includes("state=down"))
++    assert.ok(diag[0].includes("code=Backquote"))
++    assert.ok(diag[0].includes("key=Hankaku"))
++    assert.ok(diag[0].includes("keyCode=21"))
++    assert.ok(diag[0].includes("isComposing=false"))
++    assert.ok(diag[0].includes("repeat=false"))
++    assert.ok(diag[0].includes(`mapped=${StreamKeys.VK_OEM_3}`))
++    assert.ok(diag[0].includes("nonNormalized=true"))
++})
++
++test("auto repeat of an IME toggle does not send repeated taps", () => {
++    const { input, sent } = setup()
++
++    input.onKeyDown(keyEvent({ key: "KanaMode", code: "KanaMode", repeat: true }))
++    assert.equal(sent.length, 0, "repeated keydown must be ignored")
++
++    input.onKeyDown(keyEvent({ key: "KanaMode", code: "KanaMode", repeat: false }))
++    assert.equal(sent.length, 2)
++    assert.equal(sent[0].data.keyCode, StreamKeys.VK_KANA)
++})
++
++test("ambiguous Process+Backquote is logged but stays normalized", () => {
++    const { input, sent, logs } = setup()
++
++    input.onKeyDown(keyEvent({ key: "Process", code: "Backquote", keyCode: 0xe5, isComposing: true }))
++    input.onKeyUp(keyEvent({ key: "Process", code: "Backquote", keyCode: 0xe5, isComposing: true }))
++
++    assert.equal(sent.length, 2)
++    assert.equal(sent[0].data.keyCode, StreamKeys.VK_OEM_3)
++    assert.equal(sent[0].data.flags.sunshineNonNormalized, false, "ambiguous key must not be forced non normalized")
++
++    const diag = jisDiag(logs)
++    assert.equal(diag.length, 2)
++    assert.ok(diag[0].includes("key=Process"))
++    assert.ok(diag[0].includes("isComposing=true"))
++    assert.ok(diag[0].includes("nonNormalized=false"))
++})
++
++test("ordinary text input is never diagnosed", () => {
++    const { input, sent, logs } = setup()
++
++    input.onKeyDown(keyEvent({ key: "a", code: "KeyA", keyCode: 65 }))
++    input.onKeyUp(keyEvent({ key: "a", code: "KeyA", keyCode: 65 }))
++    input.onKeyDown(keyEvent({ key: "`", code: "Backquote", keyCode: 192 }))
++    input.onKeyUp(keyEvent({ key: "`", code: "Backquote", keyCode: 192 }))
++
++    assert.equal(sent.length, 4)
++    assert.equal(sent[0].data.keyCode, StreamKeys.VK_KEY_A)
++    assert.equal(sent[2].data.keyCode, StreamKeys.VK_OEM_3)
++    assert.equal(sent[2].data.flags.sunshineNonNormalized, false)
++    assert.equal(jisDiag(logs).length, 0, "ordinary text must not be logged")
++})
++
++test("remote half/full toggle sends a non normalized VK_OEM_3 tap", () => {
++    const { input, sent } = setup()
++
++    input.sendJapaneseHalfFullWidthToggle()
++
++    assert.equal(sent.length, 2)
++    assert.equal(sent[0].data.action, KeyAction.Down)
++    assert.equal(sent[0].data.keyCode, StreamKeys.VK_OEM_3)
++    assert.equal(sent[0].data.flags.sunshineNonNormalized, true)
++    assert.equal(sent[1].data.action, KeyAction.Up)
++    assert.equal(sent[1].data.flags.sunshineNonNormalized, true)
++})
++
++test("henkan/muhenkan are sent as taps too", () => {
++    const { input, sent } = setup()
++
++    input.onKeyDown(keyEvent({ key: "Convert", code: "Convert" }))
++    assert.equal(sent.length, 2)
++    assert.equal(sent[0].data.keyCode, StreamKeys.VK_CONVERT)
++    assert.equal(sent[0].data.flags.sunshineNonNormalized, true)
++
++    input.onKeyDown(keyEvent({ key: "NonConvert", code: "NonConvert" }))
++    assert.equal(sent.length, 4)
++    assert.equal(sent[2].data.keyCode, StreamKeys.VK_NONCONVERT)
++    assert.equal(sent[2].data.flags.sunshineNonNormalized, true)
++})
+diff --git a/tests/jis/keyboard.test.ts b/tests/jis/keyboard.test.ts
+new file mode 100644
+index 0000000..7207e26
+--- /dev/null
++++ b/tests/jis/keyboard.test.ts
+@@ -0,0 +1,186 @@
++import test from "node:test"
++import assert from "node:assert/strict"
++
++import { StreamKeys } from "../../web/api_bindings.ts"
++import {
++    convertToKey,
++    eventNeedsSunshineNonNormalized,
++    isJapaneseHalfFullWidthKey,
++    isJapaneseImeModeKey,
++    isLikelyJapaneseModeKey,
++    needsSunshineNonNormalized,
++} from "../../web/stream/keyboard.ts"
++
++// A KeyboardEvent shape is all the pure functions below look at. Building plain
++// objects keeps the tests independent from any DOM implementation.
++function keyEvent(overrides: Record<string, unknown> = {}): KeyboardEvent {
++    return {
++        type: "keydown",
++        code: "",
++        key: "",
++        keyCode: 0,
++        isComposing: false,
++        repeat: false,
++        shiftKey: false,
++        ctrlKey: false,
++        altKey: false,
++        metaKey: false,
++        ...overrides,
++    } as unknown as KeyboardEvent
++}
++
++// -- needsSunshineNonNormalized ------------------------------------------------
++
++test("needsSunshineNonNormalized flags only the JIS specific keys", () => {
++    assert.equal(needsSunshineNonNormalized(StreamKeys.VK_OEM_102), true) // ro
++    assert.equal(needsSunshineNonNormalized(StreamKeys.VK_KANA), true) // kana
++    assert.equal(needsSunshineNonNormalized(StreamKeys.VK_CONVERT), true) // henkan
++    assert.equal(needsSunshineNonNormalized(StreamKeys.VK_NONCONVERT), true) // muhenkan
++
++    assert.equal(needsSunshineNonNormalized(StreamKeys.VK_OEM_3), false) // ` / 半角全角 slot
++    assert.equal(needsSunshineNonNormalized(StreamKeys.VK_OEM_5), false) // yen slot keeps normalized
++    assert.equal(needsSunshineNonNormalized(StreamKeys.VK_KEY_A), false)
++})
++
++// -- Windows (Chrome/Edge) -----------------------------------------------------
++
++test("Windows 半角/全角 is a half/full width key", () => {
++    for (const event of [
++        keyEvent({ key: "Hankaku", code: "Backquote", keyCode: 0x15 }),
++        keyEvent({ key: "Zenkaku", code: "Backquote", keyCode: 0x15 }),
++        keyEvent({ key: "ZenkakuHankaku", code: "Backquote", keyCode: 0x15 }),
++        keyEvent({ key: "KanjiMode", code: "Backquote", keyCode: 0x15 }),
++    ]) {
++        assert.equal(isJapaneseHalfFullWidthKey(event), true, `${event.key} should be half/full`)
++        assert.equal(convertToKey(event), StreamKeys.VK_OEM_3, `${event.key} should map to VK_OEM_3`)
++        assert.equal(eventNeedsSunshineNonNormalized(event, StreamKeys.VK_OEM_3), true, `${event.key} needs non normalized`)
++        assert.equal(isLikelyJapaneseModeKey(event), true)
++    }
++})
++
++test("Windows Kana key maps to VK_KANA", () => {
++    for (const event of [
++        keyEvent({ key: "KanaMode", code: "KanaMode" }),
++        keyEvent({ key: "Hiragana", code: "KanaMode" }),
++        keyEvent({ key: "Katakana", code: "KanaMode" }),
++        keyEvent({ key: "KanaMode", code: "Unidentified", keyCode: 0x15 }),
++    ]) {
++        assert.equal(convertToKey(event), StreamKeys.VK_KANA, `${event.key}/${event.code} should map to VK_KANA`)
++        assert.equal(eventNeedsSunshineNonNormalized(event, StreamKeys.VK_KANA), true)
++        assert.equal(isJapaneseHalfFullWidthKey(event), false)
++        assert.equal(isJapaneseImeModeKey(event), true)
++    }
++})
++
++test("Windows henkan/muhenkan map to VK_CONVERT/VK_NONCONVERT", () => {
++    const henkan = keyEvent({ key: "Convert", code: "Convert" })
++    assert.equal(convertToKey(henkan), StreamKeys.VK_CONVERT)
++    assert.equal(eventNeedsSunshineNonNormalized(henkan, StreamKeys.VK_CONVERT), true)
++    assert.equal(isJapaneseImeModeKey(henkan), true)
++
++    const muhenkan = keyEvent({ key: "NonConvert", code: "NonConvert" })
++    assert.equal(convertToKey(muhenkan), StreamKeys.VK_NONCONVERT)
++    assert.equal(eventNeedsSunshineNonNormalized(muhenkan, StreamKeys.VK_NONCONVERT), true)
++    assert.equal(isJapaneseImeModeKey(muhenkan), true)
++})
++
++// -- Linux (Firefox) -----------------------------------------------------------
++
++test("Linux 半角/全角 (Lang5) is a half/full width key", () => {
++    for (const event of [
++        keyEvent({ key: "Hankaku", code: "Lang5" }),
++        keyEvent({ key: "ZenkakuHankaku", code: "Lang5" }),
++        keyEvent({ key: "Zenkaku", code: "Lang5" }),
++    ]) {
++        assert.equal(isJapaneseHalfFullWidthKey(event), true)
++        assert.equal(convertToKey(event), StreamKeys.VK_OEM_3)
++        assert.equal(eventNeedsSunshineNonNormalized(event, StreamKeys.VK_OEM_3), true)
++    }
++})
++
++test("Linux Kana key (Lang3/Lang4/KanaMode) maps to VK_KANA", () => {
++    for (const event of [
++        keyEvent({ key: "Hiragana", code: "Lang3" }),
++        keyEvent({ key: "Katakana", code: "Lang4" }),
++        keyEvent({ key: "KanaMode", code: "KanaMode" }),
++    ]) {
++        assert.equal(convertToKey(event), StreamKeys.VK_KANA, `${event.key}/${event.code}`)
++        assert.equal(isJapaneseHalfFullWidthKey(event), false)
++    }
++})
++
++// -- Yen and Ro ----------------------------------------------------------------
++
++test("JIS yen (IntlYen) maps to VK_OEM_5 and needs non normalized", () => {
++    const yen = keyEvent({ key: "¥", code: "IntlYen", keyCode: 0xdc })
++    assert.equal(convertToKey(yen), StreamKeys.VK_OEM_5)
++    assert.equal(eventNeedsSunshineNonNormalized(yen, StreamKeys.VK_OEM_5), true)
++    assert.equal(isJapaneseHalfFullWidthKey(yen), false)
++})
++
++test("JIS ro (IntlRo) maps to VK_OEM_102 and needs non normalized", () => {
++    const ro = keyEvent({ key: "\\", code: "IntlRo", keyCode: 0xc1 })
++    assert.equal(convertToKey(ro), StreamKeys.VK_OEM_102)
++    assert.equal(eventNeedsSunshineNonNormalized(ro, StreamKeys.VK_OEM_102), true)
++    assert.equal(isJapaneseHalfFullWidthKey(ro), false)
++})
++
++// -- Ambiguity guards ----------------------------------------------------------
++
++test("US Backquote is not treated as a Japanese key", () => {
++    for (const event of [
++        keyEvent({ key: "`", code: "Backquote", keyCode: 192 }),
++        keyEvent({ key: "~", code: "Backquote", keyCode: 192, shiftKey: true }),
++    ]) {
++        assert.equal(isJapaneseHalfFullWidthKey(event), false)
++        assert.equal(isJapaneseImeModeKey(event), false)
++        assert.equal(isLikelyJapaneseModeKey(event), false)
++        assert.equal(convertToKey(event), StreamKeys.VK_OEM_3)
++        // A US backtick/tilde on the grave slot stays normalized.
++        assert.equal(eventNeedsSunshineNonNormalized(event, StreamKeys.VK_OEM_3), false)
++    }
++})
++
++test("unknown labels on the backquote slot are diagnosed but stay normalized", () => {
++    for (const event of [
++        keyEvent({ key: "Unidentified", code: "Backquote", keyCode: 0 }),
++        keyEvent({ key: "", code: "Backquote", keyCode: 0 }),
++        keyEvent({ key: "Process", code: "Backquote", keyCode: 0xe5, isComposing: true }),
++    ]) {
++        assert.equal(isJapaneseHalfFullWidthKey(event), false, "must not be force classified as half/full")
++        assert.equal(isJapaneseImeModeKey(event), false)
++        assert.equal(isLikelyJapaneseModeKey(event), true, "should be diagnosed")
++        assert.equal(convertToKey(event), StreamKeys.VK_OEM_3)
++        assert.equal(eventNeedsSunshineNonNormalized(event, StreamKeys.VK_OEM_3), false)
++    }
++})
++
++test("ambiguous keyCode 0x15 on the Backquote slot is not classified as half/full", () => {
++    const ambiguous = keyEvent({ key: "`", code: "Backquote", keyCode: 0x15 })
++    // Must NOT be force classified as 半角/全角: it could be a US backtick.
++    assert.equal(isJapaneseHalfFullWidthKey(ambiguous), false)
++    // It is ambiguous, so it is surfaced for diagnostics instead.
++    assert.equal(isLikelyJapaneseModeKey(ambiguous), true)
++    assert.equal(eventNeedsSunshineNonNormalized(ambiguous, convertToKey(ambiguous)!), false)
++})
++
++test("ambiguous Process+Backquote is diagnosed, not translated as Japanese", () => {
++    const process = keyEvent({ key: "Process", code: "Backquote", keyCode: 0xe5, isComposing: true })
++    assert.equal(isJapaneseHalfFullWidthKey(process), false)
++    assert.equal(isJapaneseImeModeKey(process), false)
++    assert.equal(isLikelyJapaneseModeKey(process), true)
++    // Falls through to the plain grave mapping, keeping the US/JIS slot meaning.
++    assert.equal(convertToKey(process), StreamKeys.VK_OEM_3)
++    assert.equal(eventNeedsSunshineNonNormalized(process, StreamKeys.VK_OEM_3), false)
++})
++
++test("ordinary text keys are never likely JIS mode keys", () => {
++    for (const event of [
++        keyEvent({ key: "a", code: "KeyA", keyCode: 65 }),
++        keyEvent({ key: "1", code: "Digit1", keyCode: 49 }),
++        keyEvent({ key: "Enter", code: "Enter", keyCode: 13 }),
++        keyEvent({ key: " ", code: "Space", keyCode: 32 }),
++    ]) {
++        assert.equal(isLikelyJapaneseModeKey(event), false, `${event.code} must not be logged`)
++    }
++})
+diff --git a/tests/jis/register.mjs b/tests/jis/register.mjs
+new file mode 100644
+index 0000000..5bddc0b
+--- /dev/null
++++ b/tests/jis/register.mjs
+@@ -0,0 +1,5 @@
++// Registers the JIS test loader. Use with:
++//   node --import ./tests/jis/register.mjs tests/jis/<test>.ts
++import { register } from "node:module"
++
++register("./ts-loader.mjs", import.meta.url)
+diff --git a/tests/jis/run.sh b/tests/jis/run.sh
+new file mode 100755
+index 0000000..c07d5e3
+--- /dev/null
++++ b/tests/jis/run.sh
+@@ -0,0 +1,37 @@
++#!/usr/bin/env bash
++# Runs the dedicated JIS client tests.
++#
++# Prefers a host node install, otherwise falls back to a transient run of the
++# existing node image with podman. It never creates, restarts or modifies
++# containers, volumes or podman storage: `--rm` leaves nothing behind.
++#
++#   tests/jis/run.sh
++#   JIS_TEST_NODE_IMAGE=node:26-bookworm tests/jis/run.sh
++set -euo pipefail
++
++repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
++cd "$repo_root"
++
++test_files=(
++    tests/jis/keyboard.test.ts
++    tests/jis/input.test.ts
++)
++
++if command -v node >/dev/null 2>&1; then
++    for test_file in "${test_files[@]}"; do
++        node --import ./tests/jis/register.mjs "$test_file"
++    done
++    exit 0
++fi
++
++if command -v podman >/dev/null 2>&1; then
++    image="${JIS_TEST_NODE_IMAGE:-node:26-bookworm}"
++    for test_file in "${test_files[@]}"; do
++        podman run --rm -v "$repo_root":/src:ro -w /src "$image" \
++            node --import ./tests/jis/register.mjs "$test_file"
++    done
++    exit 0
++fi
++
++echo "Neither node nor podman is available; cannot run the JIS tests." >&2
++exit 1
+diff --git a/tests/jis/stubs.mjs b/tests/jis/stubs.mjs
+new file mode 100644
+index 0000000..c5a7534
+--- /dev/null
++++ b/tests/jis/stubs.mjs
+@@ -0,0 +1,61 @@
++// Stand-ins for the browser/wasm only dependencies of web/stream/input.ts.
++// Only the parts the JIS input logic touches are meaningful; everything else
++// exists so node's ESM linker can satisfy the named imports.
++
++export const showNotification = (..._args) => { }
++
++class Packet {
++    data
++    constructor(data) {
++        this.data = data
++    }
++}
++
++export const KeyAction = { Down: 0, Up: 1 }
++export const MouseButton = { Left: 0, Middle: 1, Right: 2, X1: 3, X2: 4 }
++export const MouseButtonAction = { Press: 0, Release: 1 }
++export const TouchEventType = { Down: 0, Move: 1, Up: 2, Cancel: 3 }
++export const ControllerType = { Unknown: 0 }
++export const ControlPacket_Tags = { ControllerRumbleData: 0, ControllerRumbleTriggers: 1 }
++
++export class ControlPacket extends Packet { }
++ControlPacket.Text = class extends Packet { }
++
++export class ClientInputEvent {
++    static Keyboard = class extends Packet { }
++    static MouseMoveRelative = class extends Packet { }
++    static MouseMoveAbsolute = class extends Packet { }
++    static MouseButton = class extends Packet { }
++    static MouseScrollHorizontal = class extends Packet { }
++    static MouseScrollVertical = class extends Packet { }
++    static Touch = class extends Packet { }
++    static ControllerConnect = class extends Packet { }
++    static ControllerDisconnect = class extends Packet { }
++    static ControllerState = class extends Packet { }
++}
++
++export const U16_MAX = 65535
++
++export const emptyGamepadState = () => ({
++    buttonFlags: 0,
++    leftTrigger: 0,
++    rightTrigger: 0,
++    leftStickX: 0,
++    leftStickY: 0,
++    rightStickX: 0,
++    rightStickY: 0,
++})
++export const extractGamepadState = () => emptyGamepadState()
++export const areGamepadStatesEqual = () => true
++export const SUPPORTED_BUTTONS = {}
++export const convertToButton = () => null
++
++// These are used as types only in the real sources. They are exported as values
++// so that node's ESM linker can resolve the named imports.
++export const ControllerButtons = undefined
++export const ControllerCapabilities = undefined
++export const KeyModifiers = undefined
++export const ControllerConfig = undefined
++export const GamepadState = undefined
++export const StreamCapabilities = undefined
++export const IControlStream = undefined
+diff --git a/tests/jis/ts-loader.mjs b/tests/jis/ts-loader.mjs
+new file mode 100644
+index 0000000..958a7d9
+--- /dev/null
++++ b/tests/jis/ts-loader.mjs
+@@ -0,0 +1,41 @@
++// Node ESM loader for the JIS client tests.
++//
++// The web sources use bundler style extensionless relative imports and pull in
++// the wasm/uniffi bindings, which node cannot load. This loader:
++//   1. appends ".ts" to extensionless relative specifiers, and
++//   2. replaces the browser only dependencies of web/stream/input.ts with the
++//      stubs in stubs.mjs.
++// It only affects test runs; nothing in the build uses it.
++
++const STUB_URL = new URL("./stubs.mjs", import.meta.url).href
++
++// Import specifiers used by web/stream/input.ts which must not be loaded by node.
++const STUBBED_SPECIFIERS = new Set([
++    "../component/notification",
++    "../uniffi/moonlight_common_bindings",
++    "./buffer",
++    "./gamepad",
++    "./index",
++    "./mouse",
++    "./transport/index",
++])
++
++const HAS_EXTENSION = /\.[cm]?[jt]sx?$/
++
++export async function resolve(specifier, context, nextResolve) {
++    if (STUBBED_SPECIFIERS.has(specifier)) {
++        return { url: STUB_URL, shortCircuit: true }
++    }
++
++    if ((specifier.startsWith("./") || specifier.startsWith("../")) && !HAS_EXTENSION.test(specifier)) {
++        for (const extension of [".ts", ".mts", ".tsx", ".js", ".mjs"]) {
++            try {
++                return await nextResolve(specifier + extension, context)
++            } catch {
++                // try the next extension
++            }
++        }
++    }
++
++    return nextResolve(specifier, context)
++}
+diff --git a/web/stream/input.ts b/web/stream/input.ts
+index a18452e..36536ef 100644
+--- a/web/stream/input.ts
++++ b/web/stream/input.ts
+@@ -1,9 +1,11 @@
++import { StreamKeys } from "../api_bindings"
+ import { showNotification } from "../component/notification"
+ import { ClientInputEvent, ControllerButtons, ControllerCapabilities, ControllerType, ControlPacket, ControlPacket_Tags, KeyAction, KeyModifiers, MouseButton, MouseButtonAction, TouchEventType } from "../uniffi/moonlight_common_bindings"
+ import { U16_MAX } from "./buffer"
+ import { areGamepadStatesEqual, ControllerConfig, emptyGamepadState, extractGamepadState, GamepadState, SUPPORTED_BUTTONS } from "./gamepad"
+ import { StreamCapabilities } from "./index"
+-import { convertToKey, convertToModifiers, emptyKeyModifiers } from "./keyboard"
++import { convertToKey, convertToModifiers, emptyKeyModifiers, eventNeedsSunshineNonNormalized, isJapaneseImeModeKey, isLikelyJapaneseModeKey, needsSunshineNonNormalized } from "./keyboard"
++import type { Logger } from "./log"
+ import { convertToButton } from "./mouse"
+ import { IControlStream } from "./transport/index"
+ 
+@@ -66,6 +68,11 @@ export class StreamInput {
+ 
+     private controlStream: IControlStream | null = null
+ 
++    // Optional in-app logger. StreamInput has no hard logger dependency; Stream
++    // can inject one (StreamInput.setLogger) so JIS diagnostics show up in the
++    // normal stream log. Falls back to console.debug when unset.
++    private logger: Logger | null = null
++
+     private localCursorPosition: [number, number] | null = null
+ 
+     private streamSize: [number, number] = [0, 0]
+@@ -84,6 +91,10 @@ export class StreamInput {
+         this.controlStream = controlStream
+     }
+ 
++    setLogger(logger: Logger | null) {
++        this.logger = logger
++    }
++
+     setConfig(config: StreamInputConfig) {
+         Object.assign(this.config, config)
+ 
+@@ -147,6 +158,39 @@ export class StreamInput {
+     private sendKeyEvent(isDown: boolean, event: KeyboardEvent) {
+         const key = convertToKey(event)
+         if (key == null) {
++            // Still diagnose likely JIS keys that did not translate, so an
++            // unexpected browser payload is visible instead of silently lost.
++            if (isLikelyJapaneseModeKey(event)) {
++                this.logJapaneseModeDiagnostic(isDown, event, null, false)
++            }
++            return
++        }
++
++        const nonNormalized = eventNeedsSunshineNonNormalized(event, key)
++
++        // Privacy limited diagnostics for likely Japanese IME mode keys. This is
++        // the only place keyboard events are logged; ordinary text input never
++        // matches isLikelyJapaneseModeKey().
++        if (isLikelyJapaneseModeKey(event)) {
++            this.logJapaneseModeDiagnostic(isDown, event, key, nonNormalized)
++        }
++
++        // The client's IME consumes the Japanese IME mode keys (半角/全角, かな, 変換, 無変換)
++        // and browsers often don't send a matching keyup for them when the IME mode
++        // changes (the events can even arrive as keyup/keydown pairs in the wrong
++        // order). If the key stayed pressed, the host would auto repeat it forever,
++        // so these toggles are sent as a single tap instead of tracking them as held keys.
++        if (isJapaneseImeModeKey(event)) {
++            // Auto repeat would toggle the host IME on every repeat. Ignore it
++            // so a single physical press stays a single tap where safe.
++            if (isDown && event.repeat) {
++                return
++            }
++            if (isDown) {
++                const modifiers = convertToModifiers(event)
++                this.sendKey(true, key, modifiers, nonNormalized)
++                this.sendKey(false, key, modifiers, nonNormalized)
++            }
+             return
+         }
+ 
+@@ -170,11 +214,38 @@ export class StreamInput {
+             console.debug(
+                 isDown ? "DOWN" : "UP",
+                 event.code,
+-                convertToKey(event),
+-                convertToModifiers(event)
++                key,
++                modifiers
+             )
+         }
+-        this.sendKey(isDown, key, modifiers)
++        this.sendKey(isDown, key, modifiers, nonNormalized)
++    }
++
++    // Privacy limited diagnostic for the Japanese IME mode keys. Only the event
++    // shape needed to debug JIS translation is logged, and only for events
++    // matched by isLikelyJapaneseModeKey().
++    private logJapaneseModeDiagnostic(isDown: boolean, event: KeyboardEvent, key: number | null, nonNormalized: boolean) {
++        const line = `JIS diag: state=${isDown ? "down" : "up"}`
++            + ` code=${event.code} key=${event.key} keyCode=${event.keyCode}`
++            + ` isComposing=${event.isComposing} repeat=${event.repeat}`
++            + ` mapped=${key == null ? "null" : key} nonNormalized=${nonNormalized}`
++
++        if (this.logger) {
++            this.logger.debug(line)
++        } else if ("debug" in console) {
++            console.debug(line)
++        }
++    }
++
++    // Fallback for clients where the physical 半角/全角 (Zenkaku/Hankaku) key is
++    // swallowed by the client IME and never reaches the page, so no DOM event
++    // exists to translate. Sends a single tap of the host key on the same
++    // physical position (US ` / JIS 半角/全角) marked as non normalized. The
++    // host must use a JP keymap where that position is 半角/全角. Wiring this to
++    // a UI control is intentionally left to the caller.
++    sendJapaneseHalfFullWidthToggle(modifiers: KeyModifiers = emptyKeyModifiers()) {
++        this.sendKey(true, StreamKeys.VK_OEM_3, modifiers, true)
++        this.sendKey(false, StreamKeys.VK_OEM_3, modifiers, true)
+     }
+ 
+     raiseAllKeys() {
+@@ -185,12 +256,12 @@ export class StreamInput {
+     }
+ 
+     // Note: key = StreamKeys.VK_, modifiers = StreamKeyModifiers.
+-    sendKey(isDown: boolean, key: number, modifiers: KeyModifiers) {
++    sendKey(isDown: boolean, key: number, modifiers: KeyModifiers, nonNormalized?: boolean) {
+         this.controlStream?.send(new ClientInputEvent.Keyboard({
+             action: isDown ? KeyAction.Down : KeyAction.Up,
+             flags: {
+-                // TODO: what is this?
+-                sunshineNonNormalized: false
++                // JIS specific keys must not be treated as US keys by Sunshine
++                sunshineNonNormalized: nonNormalized ?? needsSunshineNonNormalized(key)
+             },
+             keyCode: key,
+             modifiers,
+diff --git a/web/stream/keyboard.ts b/web/stream/keyboard.ts
+index 8f391d4..58bda9d 100644
+--- a/web/stream/keyboard.ts
++++ b/web/stream/keyboard.ts
+@@ -1,5 +1,7 @@
+ import { StreamKeys } from "../api_bindings"
+-import { KeyModifiers } from "../uniffi/moonlight_common_bindings";
++// Type only: keeps this module free of the heavy uniffi/wasm runtime so the
++// pure JIS translation logic can be exercised by node based tests.
++import type { KeyModifiers } from "../uniffi/moonlight_common_bindings";
+ 
+ export function emptyKeyModifiers(): KeyModifiers {
+     return {
+@@ -157,8 +159,12 @@ const VK_MAPPINGS: Record<string, number | null> = {
+     KanaMode: StreamKeys.VK_KANA,
+     Lang1: StreamKeys.VK_HANGUL,
+     Lang2: StreamKeys.VK_JUNJA,
++    // Zenkaku/Hankaku (half-width/full-width) key on Linux, which sits on the
++    // same physical position as the US `~ key
++    Lang5: StreamKeys.VK_OEM_3,
+     IntlRo: StreamKeys.VK_OEM_102,
+-    IntlYen: null,
++    // JIS yen/pipe key (left of backspace)
++    IntlYen: StreamKeys.VK_OEM_5,
+     NumpadComma: null,
+     Power: null,
+     Sleep: StreamKeys.VK_SLEEP,
+@@ -606,10 +612,149 @@ const VK_MAPPINGS: Record<string, number | null> = {
+     // Fn: null,
+ }
+ 
++// Keys which toggle the state of the Japanese IME on the client.
++// Browsers don't report these consistently: for example the Zenkaku/Hankaku
++// (半角/全角) key is reported as "Backquote" on Windows and as "Lang5" on Linux,
++// while the Kana (かな) key is reported as "KanaMode".
++export function isJapaneseImeModeKey(event: KeyboardEvent): boolean {
++    switch (event.key) {
++        // 半角/全角 (hankaku/zenkaku), 漢字 (kanji), 英数 (eisu), かな (kana)
++        case "Hankaku":
++        case "Zenkaku":
++        case "ZenkakuHankaku":
++        case "KanjiMode":
++        case "Eisu":
++        case "Alphanumeric":
++        case "Hiragana":
++        case "Katakana":
++        case "KanaMode":
++        // 変換 (henkan), 無変換 (muhenkan)
++        case "Convert":
++        case "NonConvert":
++            return true
++    }
++
++    switch (event.code) {
++        // かな (kana), ひらがな/カタカナ (hiragana/katakana), 半角/全角 on Linux
++        case "KanaMode":
++        case "Lang3":
++        case "Lang4":
++        case "Lang5":
++        // 変換 (henkan), 無変換 (muhenkan)
++        case "Convert":
++        case "NonConvert":
++            return true
++    }
++
++    // The Kana virtual key code (also used for the Zenkaku/Hankaku key on Windows)
++    if (event.keyCode == 0x15) {
++        return true
++    }
++
++    return false
++}
++
++// Whether the key is one of the Kana (かな) keys instead of a US layout key
++function isJapaneseKanaKey(event: KeyboardEvent): boolean {
++    switch (event.key) {
++        case "Hiragana":
++        case "Katakana":
++        case "KanaMode":
++            return true
++    }
++
++    switch (event.code) {
++        case "KanaMode":
++        case "Lang3":
++        case "Lang4":
++            return true
++    }
++
++    // VK_KANA, which Windows also reports for the Zenkaku/Hankaku key
++    return event.keyCode == 0x15 && event.code != "Backquote" && event.code != "Lang5"
++}
++
++export function isJapaneseHalfFullWidthKey(event: KeyboardEvent): boolean {
++    return event.code == "Lang5"
++        || ["Hankaku", "Zenkaku", "ZenkakuHankaku", "KanjiMode"].includes(event.key)
++}
++
++// VK_PROCESSKEY: Chrome/Edge report this on Windows while the active IME is
++// processing a key, so the physical key cannot be identified from keyCode.
++const VK_PROCESSKEY = 0xe5
++
++// Event based predicate for the privacy limited JIS diagnostics.
++//
++// Only keys which are (or may be) one of the Japanese IME mode keys match, so
++// ordinary text input is never logged. The ambiguous payloads stay ambiguous:
++// the US `~ slot (Backquote) and the Kana virtual key code (0x15) can belong
++// to different physical keys depending on browser and OS, so this only decides
++// whether to *log* them, never how to translate them. See convertToKey().
++export function isLikelyJapaneseModeKey(event: KeyboardEvent): boolean {
++    if (isJapaneseImeModeKey(event) || isJapaneseHalfFullWidthKey(event)) {
++        return true
++    }
++
++    // 半角/全角 on Windows is sometimes delivered with the physical backquote
++    // slot while the IME is "processing" it. On a US keyboard the very same
++    // slot is an ordinary `~ key, which is why this is logged instead of being
++    // force classified as a Japanese half/full width key.
++    //
++    // A plain US ` or ~ is excluded so ordinary text stays out of the log; every
++    // other label on the backquote slot (Process, Unidentified, Hankaku, ...)
++    // is ambiguous and worth diagnosing.
++    if (event.code == "Backquote" && event.key != "`" && event.key != "~") {
++        return true
++    }
++    if (event.code == "Backquote"
++        && (event.keyCode == VK_PROCESSKEY || event.keyCode == 0x15)) {
++        return true
++    }
++
++    return false
++}
++
+ export function convertToKey(event: KeyboardEvent): number | null {
++    // Identify 半角/全角 before VK_KANA: some browsers report keyCode=0x15
++    // without a stable physical code, which previously turned it into かな.
++    if (isJapaneseHalfFullWidthKey(event)) {
++        return StreamKeys.VK_OEM_3
++    }
++    // The Kana key doesn't have a stable code/key across browsers and platforms
++    if (isJapaneseKanaKey(event)) {
++        return StreamKeys.VK_KANA
++    }
++
+     let key = VK_MAPPINGS[event.code] ?? null
+     if (key == null) {
+         key = VK_MAPPINGS[event.key] ?? null
+     }
+     return key
+ }
++
++// Whether the key has to be sent with the "sunshine non normalized" flag.
++//
++// With LizardByte/Sunshine#5542 and LizardByte/libvirtualhid#101 Sunshine uses
++// the flag to translate the JIS specific keys instead of using their US
++// positions:
++//   VK_OEM_102 -> KEY_RO  (JIS ro key: \ _)
++//   VK_OEM_5   -> KEY_YEN (JIS yen key: \ |)
++//   VK_KANA / VK_CONVERT / VK_NONCONVERT -> かな / 変換 / 無変換
++// See the "Japanese keyboards" section in the README for how to build Sunshine
++// with those changes.
++export function needsSunshineNonNormalized(keyCode: number): boolean {
++    return keyCode == StreamKeys.VK_OEM_102 // JIS ro key (backslash/underscore)
++        || keyCode == StreamKeys.VK_CONVERT // 変換
++        || keyCode == StreamKeys.VK_NONCONVERT // 無変換
++        || keyCode == StreamKeys.VK_KANA // かな
++}
++
++// Event based variant of needsSunshineNonNormalized(). The JIS yen key uses the
++// same virtual key code as the `]` key, which must keep the normalized
++// mapping, so the physical key has to decide.
++export function eventNeedsSunshineNonNormalized(event: KeyboardEvent, keyCode: number): boolean {
++    // In the host's JP keymap the physical grave position is 半角/全角.
++    // Normalizing it to the US ` keysym can lose the IME toggle entirely.
++    return isJapaneseHalfFullWidthKey(event)
++        || event.code == "IntlYen" || needsSunshineNonNormalized(keyCode)
++}
+diff --git a/web/stream/transport/webrtc.ts b/web/stream/transport/webrtc.ts
+index eabca7e..eab41d3 100644
+--- a/web/stream/transport/webrtc.ts
++++ b/web/stream/transport/webrtc.ts
+@@ -570,6 +570,23 @@ class WebRtcControlStream implements IControlStream {
+                 this.sendKeysCompact()
+                 break
+             case ClientInputEvent_Tags.Keyboard:
++                // The Japanese IME mode keys (Zenkaku/Hankaku, Kana, Henkan,
++                // Muhenkan) are sent as a tap (see StreamInput). Send them on
++                // the reliable/ordered channel so the press/release pair cannot
++                // be dropped or reordered by the unordered/unreliable compact
++                // key state channel. JIS specific keys (non normalized) also
++                // have to keep their flags, which the compact channel loses.
++                if (input.inner.flags.sunshineNonNormalized || input.inner.keyCode == StreamKeys.VK_KANA || input.inner.keyCode == StreamKeys.VK_OEM_3) {
++                    this.trySendOn(this.keys, new ControlPacket.Keyboard({
++                        action: input.inner.action,
++                        flags: input.inner.flags,
++                        keyCode: input.inner.keyCode,
++                        modifiers: input.inner.modifiers,
++                        zero: 0,
++                    }))
++                    break
++                }
++
+                 if (input.inner.action == KeyAction.Down) {
+                     this.currentPressedKeys.add(input.inner.keyCode)
+                 } else {

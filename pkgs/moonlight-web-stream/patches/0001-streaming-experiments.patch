@@ -1,0 +1,3372 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index 2a57c61..348b23e 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -1850,7 +1850,6 @@ dependencies = [
+ [[package]]
+ name = "moonlight-common"
+ version = "0.1.0"
+-source = "git+https://github.com/MrCreativ3001/moonlight-common-rust.git?rev=cc7ec8c3b3063742f4941500dcb78650bd0a9b98#cc7ec8c3b3063742f4941500dcb78650bd0a9b98"
+ dependencies = [
+  "aes",
+  "aes-gcm",
+diff --git a/Cargo.toml b/Cargo.toml
+index 9ee5755..10fc1eb 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -26,8 +26,9 @@ actix-files = "0.6.6"
+ actix-ws = "0.4.0"
+ 
+ # Moonlight
+-# Make sure to keep the ubrn.config.yaml repo the same as this
+-moonlight-common = { git = "https://github.com/MrCreativ3001/moonlight-common-rust.git", rev = "cc7ec8c3b3063742f4941500dcb78650bd0a9b98", features = [
++# Use the vendored library so local protocol fixes are included in server builds.
++# Browser bindings remain configured separately in ubrn.config.yaml.
++moonlight-common = { path = "rust_modules/moonlight-common-rust", features = [
+     "tokio",
+     "tokio-hyper",
+     "rustcrypto",
+diff --git a/package.json b/package.json
+index 36c7ebe..ad3fb30 100644
+--- a/package.json
++++ b/package.json
+@@ -27,7 +27,7 @@
+     "prebuild": "npm run generate-bindings && npm run build-moonlight-common",
+     "generate-bindings": "cargo test export_bindings",
+     "build-moonlight-common": "npm run ubrn:checkout && npm run ubrn:build",
+-    "ubrn:checkout": "ubrn checkout",
++    "ubrn:checkout": "ubrn checkout && bash scripts/prepare-moonlight-common.sh",
+     "ubrn:build": "ubrn build web"
+   },
+   "license": "GPL-3.0-or-later",
+@@ -46,4 +46,4 @@
+     "webpack": "5.107.2",
+     "webpack-cli": "7.0.3"
+   }
+-}
+\ No newline at end of file
++}
+diff --git a/patches/moonlight-common-av1.patch b/patches/moonlight-common-av1.patch
+new file mode 100644
+index 0000000..048a37a
+--- /dev/null
++++ b/patches/moonlight-common-av1.patch
+@@ -0,0 +1,108 @@
++diff --git a/src/stream/proto/mod.rs b/src/stream/proto/mod.rs
++--- a/src/stream/proto/mod.rs
+++++ b/src/stream/proto/mod.rs
++@@ -55,6 +55,83 @@
++     },
++ };
++ 
+++fn select_av1_format(host: ServerCodecModeSupport, client: VideoFormats) -> Option<VideoFormat> {
+++    [
+++        (
+++            ServerCodecModeSupport::AV1_HIGH10_444,
+++            VideoFormats::AV1_HIGH10_444,
+++            VideoFormat::Av1High10_444,
+++        ),
+++        (
+++            ServerCodecModeSupport::AV1_MAIN10,
+++            VideoFormats::AV1_MAIN10,
+++            VideoFormat::Av1Main10,
+++        ),
+++        (
+++            ServerCodecModeSupport::AV1_HIGH8_444,
+++            VideoFormats::AV1_HIGH8_444,
+++            VideoFormat::Av1High8_444,
+++        ),
+++        (
+++            ServerCodecModeSupport::AV1_MAIN8,
+++            VideoFormats::AV1_MAIN8,
+++            VideoFormat::Av1Main8,
+++        ),
+++    ]
+++    .into_iter()
+++    .find_map(|(capability, supported, format)| {
+++        (host.contains(capability) && client.contains(supported)).then_some(format)
+++    })
+++}
+++
+++#[cfg(test)]
+++mod av1_selection_tests {
+++    use super::*;
+++
+++    #[test]
+++    fn selects_av1_when_h264_is_also_allowed() {
+++        assert_eq!(
+++            select_av1_format(
+++                ServerCodecModeSupport::AV1_MAIN8,
+++                VideoFormats::AV1_MAIN8 | VideoFormats::H264,
+++            ),
+++            Some(VideoFormat::Av1Main8)
+++        );
+++    }
+++
+++    #[test]
+++    fn requires_a_matching_host_and_client_profile() {
+++        assert_eq!(
+++            select_av1_format(ServerCodecModeSupport::empty(), VideoFormats::AV1_MAIN8),
+++            None
+++        );
+++        assert_eq!(
+++            select_av1_format(ServerCodecModeSupport::AV1_MAIN8, VideoFormats::H264),
+++            None
+++        );
+++        assert_eq!(
+++            select_av1_format(ServerCodecModeSupport::AV1_MAIN10, VideoFormats::AV1_MAIN8),
+++            None
+++        );
+++    }
+++
+++    #[test]
+++    fn prefers_ten_bit_but_falls_back_to_mutual_eight_bit() {
+++        let client = VideoFormats::AV1_MAIN8 | VideoFormats::AV1_MAIN10;
+++        assert_eq!(
+++            select_av1_format(
+++                ServerCodecModeSupport::AV1_MAIN8 | ServerCodecModeSupport::AV1_MAIN10,
+++                client,
+++            ),
+++            Some(VideoFormat::Av1Main10)
+++        );
+++        assert_eq!(
+++            select_av1_format(ServerCodecModeSupport::AV1_MAIN8, client),
+++            Some(VideoFormat::Av1Main8)
+++        );
+++    }
+++}
+++
++ // TODO: implement apollo extensions: https://github.com/ClassicOldSong/moonlight-common-c/commit/84af637de7718d1bb390332f0e37a4c6d59e6b78
++ // Detect apollo based on: if we have a "Permission" field in the xml?
++ // - https://github.com/LizardByte/Sunshine/blob/c9e0bb864ed263da6dd5c2fff5541c268f94cfaf/src/nvhttp.cpp#L679-L770
++@@ -958,14 +1035,18 @@
++         };
++ 
++         // -- Select Video Format
++-        // Av1 is not supported in this implementation currently
++         // See https://github.com/moonlight-stream/moonlight-common-c/blob/7b026e77be62175104640e7e722b758df6d3d0d7/src/RtspConnection.c#L1090-L1136
++         let negotiated_video_format;
++ 
++-        if self
+++        if let Some(format) = select_av1_format(
+++            self.client_config.server_codec_mode_support,
+++            self.client_settings.supported_video_formats,
+++        ) {
+++            negotiated_video_format = format;
+++        } else if self
++             .client_config
++             .server_codec_mode_support
++             .intersects(ServerCodecModeSupport::MASK_HEVC)
++             && self
++                 .client_settings
++                 .supported_video_formats
+diff --git a/scripts/podman-build-image.sh b/scripts/podman-build-image.sh
+new file mode 100644
+index 0000000..83d1119
+--- /dev/null
++++ b/scripts/podman-build-image.sh
+@@ -0,0 +1,45 @@
++#!/usr/bin/env bash
++# Build moonlight-web-stream:local with podman from inside a distrobox WITHOUT
++# breaking `distrobox enter`.
++#
++# Why: distrobox bind-mounts /run/user/$UID from the host, so a podman running
++# inside the container shares the host libpod runtime and overwrites the host
++# pause process (/run/user/$UID/libpod/tmp/pause.pid). The host podman (and
++# therefore `distrobox enter`) then fails. See docker/README.md
++# "Troubleshooting podman inside a container" item 4 and
++# docker/BUILD-WITH-PODMAN.ja.md.
++#
++# The private XDG_RUNTIME_DIR also moves the runroot (default
++# $XDG_RUNTIME_DIR/containers) into the private directory. The image itself
++# still lands in the normal podman storage, so `podman images`, `podman save`
++# and the existing transfer workflow keep working.
++#
++# Usage:
++#   bash scripts/podman-build-image.sh [output.tar]
++#
++# Environment:
++#   PODMAN_BUILD_RUNTIME  private runtime directory (default /tmp/podman-runtime)
++set -euo pipefail
++
++root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
++runtime="${PODMAN_BUILD_RUNTIME:-/tmp/podman-runtime}"
++image=moonlight-web-stream:local
++tar="${1:-$PWD/moonlight-web-stream-local.tar}"
++
++umask 077
++mkdir -p -m 700 "$runtime"
++
++echo "Using private podman runtime: $runtime"
++XDG_RUNTIME_DIR="$runtime" podman build --format docker \
++  -f "$root/docker/Dockerfile.build" \
++  -t "$image" \
++  "$root"
++
++XDG_RUNTIME_DIR="$runtime" podman save --format docker-archive \
++  -o "$tar" "$image"
++
++echo
++echo "Built image:  $image"
++echo "Saved archive: $tar"
++echo "Next: transfer the archive to the relay and run 'docker load -i' there,"
++echo "      then recreate the moonlight-web container (e.g. docker compose up -d --force-recreate)."
+diff --git a/scripts/prepare-moonlight-common.sh b/scripts/prepare-moonlight-common.sh
+new file mode 100644
+index 0000000..1295f3e
+--- /dev/null
++++ b/scripts/prepare-moonlight-common.sh
+@@ -0,0 +1,28 @@
++#!/usr/bin/env bash
++set -euo pipefail
++
++root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
++library="$root/rust_modules/moonlight-common-rust"
++patch="$root/patches/moonlight-common-av1.patch"
++revision=cc7ec8c3b3063742f4941500dcb78650bd0a9b98
++
++if [[ ! -d "$library/.git" ]]; then
++    if [[ -e "$library" ]]; then
++        echo "Refusing to overwrite existing non-Git directory: $library" >&2
++        exit 1
++    fi
++    mkdir -p "$(dirname "$library")"
++    git init "$library"
++    git -C "$library" remote add origin https://github.com/MrCreativ3001/moonlight-common-rust.git
++    git -C "$library" fetch --depth=1 origin "$revision"
++    git -C "$library" checkout --detach FETCH_HEAD
++fi
++
++if git -C "$library" apply --ignore-whitespace --reverse --check "$patch" 2>/dev/null; then
++    echo "Moonlight AV1 selection patch is already applied."
++elif git -C "$library" apply --ignore-whitespace --check "$patch"; then
++    git -C "$library" apply --ignore-whitespace "$patch"
++else
++    echo "AV1 patch does not match this checkout; existing changes were not discarded." >&2
++    exit 1
++fi
+diff --git a/src/api/stream/mod.rs b/src/api/stream/mod.rs
+index a51e9f8..3aeadfd 100644
+--- a/src/api/stream/mod.rs
++++ b/src/api/stream/mod.rs
+@@ -3,7 +3,7 @@ use moonlight_common::{
+     stream::{
+         MoonlightStreamSettings,
+         proto::control::packet::{ControlPacketConfig, RawControlPacketType},
+-        video::VideoFormats,
++        video::{ServerCodecModeSupport, VideoFormats},
+     },
+ };
+ 
+@@ -12,9 +12,93 @@ use crate::api::bindings::StreamPermissions;
+ pub mod web_socket;
+ pub mod webrtc;
+ 
++/// Video packet payload size requested from the Moonlight host.
++///
++/// The host splits each encoded frame into datagrams of about this size, so
++/// larger values save header overhead but must fit the path MTU: 2048 byte
++/// payloads become ~2.1 KiB datagrams once the RTP, UDP and IP headers are
++/// added, which are fragmented into two IP fragments on any normal 1500 byte
++/// link and on a smaller MTU tunnel as well. Fragment loss takes out a whole
++/// frame chunk and doubles the packet rate (a common cause for "the
++/// host -> relay link is too heavy" symptoms without any visible error).
++///
++/// 1392 is Moonlight's classic default and fits PPPoE/1500 byte paths. Check the
++/// real limit with `ping -M do -c1 -s <MTU - 28>` and use
++/// `packet_size = MTU - 28 - 16`: 1456 for a 1500 byte path, 1236 for a 1280
++/// byte Tailscale/WireGuard tunnel. Override it with `moonlight.packet_size` in
++/// the config or `MOONLIGHT_PACKET_SIZE`.
++pub const VIDEO_PACKET_SIZE: u32 = 1392;
++
++/// Apply the preference only after permissions and host capabilities are known.
++/// H264 remains a fallback, never an override of an available preferred AV1 codec.
++fn select_video_formats(
++    supported: VideoFormats,
++    preferred: VideoFormats,
++    host: ServerCodecModeSupport,
++) -> VideoFormats {
++    let mut available = supported;
++    for (format, capability) in [
++        (VideoFormats::AV1_MAIN8, ServerCodecModeSupport::AV1_MAIN8),
++        (VideoFormats::AV1_MAIN10, ServerCodecModeSupport::AV1_MAIN10),
++        (VideoFormats::AV1_HIGH8_444, ServerCodecModeSupport::AV1_HIGH8_444),
++        (VideoFormats::AV1_HIGH10_444, ServerCodecModeSupport::AV1_HIGH10_444),
++    ] {
++        if !host.contains(capability) {
++            available.remove(format);
++        }
++    }
++    let preferred_av1 = available & preferred & VideoFormats::MASK_AV1;
++    if preferred.intersects(VideoFormats::MASK_AV1)
++        && !preferred.intersects(VideoFormats::MASK_H265)
++    {
++        if !preferred_av1.is_empty() {
++            return preferred_av1;
++        }
++        return available & VideoFormats::MASK_H264;
++    }
++    let selected = available & preferred;
++    if selected.is_empty() {
++        available & VideoFormats::MASK_H264
++    } else {
++        selected
++    }
++}
++
+ fn server_version() -> ServerVersion {
+     ServerVersion::new(7, 0, 0, 0)
+ }
++
++#[cfg(test)]
++mod codec_tests {
++    use super::*;
++
++    #[test]
++    fn av1_preference_and_h264_fallback() {
++        let supported = VideoFormats::AV1_MAIN8 | VideoFormats::H264;
++        assert_eq!(
++            select_video_formats(supported, supported, ServerCodecModeSupport::AV1_MAIN8),
++            VideoFormats::AV1_MAIN8,
++        );
++        assert_eq!(
++            select_video_formats(supported, supported, ServerCodecModeSupport::empty()),
++            VideoFormats::H264,
++        );
++    }
++
++    #[test]
++    fn fallback_respects_client_support_and_permissions() {
++        assert!(select_video_formats(
++            VideoFormats::AV1_MAIN8,
++            VideoFormats::AV1_MAIN8 | VideoFormats::H264,
++            ServerCodecModeSupport::empty(),
++        ).is_empty());
++        assert_eq!(select_video_formats(
++            VideoFormats::H264,
++            VideoFormats::AV1_MAIN8 | VideoFormats::H264,
++            ServerCodecModeSupport::AV1_MAIN8,
++        ), VideoFormats::H264);
++    }
++}
+ fn create_control_packet_config() -> ControlPacketConfig {
+     let mut config =
+         ControlPacketConfig::new(server_version(), true).expect("control packet config");
+diff --git a/src/api/stream/web_socket.rs b/src/api/stream/web_socket.rs
+index c7b3a47..644de70 100644
+--- a/src/api/stream/web_socket.rs
++++ b/src/api/stream/web_socket.rs
+@@ -1,4 +1,8 @@
+-use std::{pin::pin, sync::Arc, time::Duration};
++use std::{
++    pin::pin,
++    sync::Arc,
++    time::{Duration, Instant},
++};
+ 
+ use crate::api::{
+     bindings::{
+@@ -7,9 +11,8 @@ use crate::api::{
+     },
+     stream::apply_role_restrictions,
+ };
+-use actix_web::{Error, HttpRequest, HttpResponse, get, rt::spawn, web::Payload};
++use actix_web::{Error, HttpRequest, HttpResponse, get, rt::spawn, web::{Data, Payload}};
+ use actix_ws::{Message, MessageStream, Session};
+-use bytes::Bytes;
+ use moonlight_common::{
+     AppId,
+     crypto::rustcrypto::RustCryptoBackend,
+@@ -32,20 +35,22 @@ use moonlight_common::{
+ };
+ use tokio::{
+     select,
+-    sync::mpsc::{UnboundedSender, unbounded_channel},
+     time::{interval, sleep},
+ };
+ use tracing::{Instrument, debug, debug_span, error, info, instrument, trace, warn};
+ 
+-use crate::{
+-    api::stream::create_control_packet_config,
+-    app::{AppError, host::HostId, user::AuthenticatedUser},
++#[path = "ws_relay.rs"]
++mod ws_relay;
++
++use ws_relay::{
++    RelayMetrics, RelayQueueConfig, RelayReceiver, RelaySendError, RelaySender, WsData,
++    format_summary, new_queue,
+ };
+ 
+-enum WsData {
+-    Bytes(Bytes),
+-    Text(String),
+-}
++use crate::{
++    api::stream::{create_control_packet_config, VIDEO_PACKET_SIZE},
++    app::{App, AppError, host::HostId, user::AuthenticatedUser},
++};
+ 
+ #[get("/host/stream/web_socket")]
+ #[instrument(skip(user, req, body_stream), fields(user = %user.id()))]
+@@ -64,12 +69,18 @@ pub async fn web_socket_stream(
+         return Err(AppError::Forbidden.into());
+     }
+ 
++    // The packet size has to fit the MTU of the host -> relay path.
++    let packet_size = req
++        .app_data::<Data<App>>()
++        .map(|app| app.config().moonlight.packet_size)
++        .unwrap_or(VIDEO_PACKET_SIZE);
++
+     // upgrade connection to web socket connection
+     let (res, ws_sender, ws_receiver) = actix_ws::handle(&req, body_stream)?;
+ 
+     spawn(
+         async move {
+-            match handle_ws(user, ws_sender, ws_receiver).await {
++            match handle_ws(user, ws_sender, ws_receiver, packet_size).await {
+                 Ok(_) => {}
+                 Err(err) => {
+                     error!(error = %err, "stream failed");
+@@ -84,8 +95,9 @@ pub async fn web_socket_stream(
+ 
+ async fn handle_ws(
+     mut user: AuthenticatedUser,
+-    mut ws_sender: Session,
++    ws_sender: Session,
+     mut ws_receiver: MessageStream,
++    packet_size: u32,
+ ) -> Result<(), AppError> {
+     let control_config = create_control_packet_config();
+ 
+@@ -154,7 +166,7 @@ async fn handle_ws(
+         fps: stream_request.fps,
+         fps_x100: stream_request.fps * 100,
+         bitrate: stream_request.bitrate,
+-        packet_size: 2048,
++        packet_size,
+         encryption_flags: EncryptionFlags::AUDIO | EncryptionFlags::FOUNDATION_MICROPHONE,
+         streaming_remotely: StreamingConfig::Auto,
+         sops: true,
+@@ -178,6 +190,11 @@ async fn handle_ws(
+     let server_version = host.version().await?;
+     let gfe_version = host.gfe_version().await?;
+     let server_codec_mode_support = host.server_codec_mode_support().await?;
++    settings.supported_video_formats = super::select_video_formats(
++        settings.supported_video_formats,
++        VideoFormats::from_bits_retain(stream_request.preferred_codecs),
++        server_codec_mode_support,
++    );
+     settings.adjust_for_server(server_version, &gfe_version, server_codec_mode_support)?;
+ 
+     // encryption
+@@ -221,48 +238,135 @@ async fn handle_ws(
+     });
+     info!(response = ?response, "sending response to client");
+ 
+-    let (mut ws_channel_sender, mut ws_channel_receiver) = unbounded_channel();
++    // Bounded, byte-accounted queue. The Moonlight driver is never stalled by the
++    // WebSocket peer: producers only ever use try_send and terminate the session if
++    // the hard budget is exceeded.
++    let (relay_sender, relay_receiver) = new_queue(RelayQueueConfig::default());
+     spawn(
+-        async move {
+-            while let Some(data) = ws_channel_receiver.recv().await {
+-                match data {
+-                    WsData::Bytes(bytes) => {
+-                        if ws_sender.binary(bytes).await.is_err() {
+-                            break;
+-                        }
+-                    }
+-                    WsData::Text(text) => {
+-                        if ws_sender.text(text).await.is_err() {
+-                            break;
+-                        }
+-                    }
+-                }
+-            }
+-
+-            debug!("stopped web socket sending task");
+-        }
+-        .instrument(debug_span!("ws_sender")),
++        ws_sender_task(ws_sender, relay_receiver).instrument(debug_span!("ws_sender")),
+     );
+ 
+     // send response
+-    send_ws_message(&mut ws_channel_sender, response);
++    if let Err(err) = send_ws_message(&relay_sender, response) {
++        warn!(error = %err, "failed to queue the stream start response");
++        return Err(AppError::StreamClosed);
++    }
+ 
+     // main loop
+-    if let Err(err) = ws_loop(ws_channel_sender, ws_receiver, stream, control_config).await {
++    if let Err(err) = ws_loop(relay_sender, ws_receiver, stream, control_config).await {
+         error!(error = %err, "web socket main loop errored, closing stream");
+     }
+ 
+     Ok(())
+ }
+ 
++/// Drains the bounded relay queue into the WebSocket.
++///
++/// The frame (and therefore its queue-byte reservation) is dropped when the send
++/// finishes, whether it succeeded, failed or the task is cancelled mid-await.
++async fn ws_sender_task(mut ws_sender: Session, mut relay_receiver: RelayReceiver) {
++    let metrics = relay_receiver.metrics();
++
++    while let Some(frame) = relay_receiver.recv().await {
++        let kind = frame.kind;
++        let size = frame.size;
++        let send_start = Instant::now();
++        let residence = send_start.saturating_duration_since(frame.enqueued_at);
++        let data = frame.data;
++
++        let result = match data {
++            WsData::Bytes(bytes) => ws_sender.binary(bytes).await,
++            WsData::Text(text) => ws_sender.text(text).await,
++        };
++
++        let send_duration = send_start.elapsed();
++
++        match result {
++            Ok(()) => {
++                metrics.record_sent(kind, size, residence, send_duration);
++            }
++            Err(err) => {
++                metrics.record_send_error();
++                debug!(
++                    error = %err,
++                    kind = kind.label(),
++                    send_ms = send_duration.as_millis() as u64,
++                    "web socket send failed, stopping the sender task"
++                );
++                break;
++            }
++        }
++    }
++
++    debug!("stopped web socket sending task");
++}
++
++/// Handles a relay enqueue failure. Returns `true` when the main loop must stop.
++///
++/// A closed queue means the peer/sender is gone. A full queue or an oversized frame
++/// means the session cannot make progress without either growing without bound or
++/// silently dropping deltas; instead of an untested keyframe resync we terminate the
++/// congested session gracefully so the client reconnects (which restarts from a keyframe).
++fn handle_relay_error(
++    err: RelaySendError,
++    relay_sender: &RelaySender,
++    stream: &mut MoonlightStream,
++    metrics: &RelayMetrics,
++) -> bool {
++    match err {
++        RelaySendError::Closed => {
++            debug!("relay queue closed, stopping the stream");
++            // The sender task exits when the WebSocket dies, which can race
++            // ahead of the receiver observing Close. Tell the host explicitly
++            // so the session is not left dangling until its own timeout.
++            let _ = stream.disconnect();
++            true
++        }
++        RelaySendError::Full { .. } | RelaySendError::FrameTooLarge { .. } => {
++            let snapshot = metrics.snapshot();
++            let config = relay_sender.config();
++            warn!(
++                error = %err,
++                queued_bytes = snapshot.queued_bytes,
++                queued_frames = snapshot.queued_frames,
++                peak_queued_bytes = metrics.peak_queued_bytes(),
++                max_queue_bytes = config.max_queued_bytes,
++                max_frame_bytes = config.max_frame_bytes,
++                "relay websocket queue budget exceeded; terminating the congested session so the client can reconnect"
++            );
++            let _ = stream.disconnect();
++            true
++        }
++    }
++}
++
+ async fn ws_loop(
+-    mut ws_sender: UnboundedSender<WsData>,
++    relay_sender: RelaySender,
+     mut ws_receiver: MessageStream,
+     mut stream: MoonlightStream,
+     control_config: ControlPacketConfig,
+ ) -> Result<(), AppError> {
+     let mut relay_stats_ticker = pin!(interval(Duration::from_secs(1)));
+ 
++    let relay_metrics = relay_sender.metrics();
++    let mut previous_snapshot = relay_metrics.snapshot();
++
++    // Payload traffic received from the host, i.e. the host -> relay leg. The
++    // frame sizes are measured after depayloading, so the UDP/FEC and IP
++    // overhead are not included: a value close to the configured bitrate means
++    // the encoders match the request, a much larger one means the encoder
++    // overshoots (and the host NIC counters show the real wire rate).
++    let mut host_video_frames: u64 = 0;
++    let mut host_video_bytes: u64 = 0;
++    let mut host_audio_frames: u64 = 0;
++    let mut host_audio_bytes: u64 = 0;
++    let mut host_video_receive_gap_max = Duration::ZERO;
++    let mut host_last_video_at: Option<Instant> = None;
++    let mut previous_host_video_frames: u64 = 0;
++    let mut previous_host_video_bytes: u64 = 0;
++    let mut previous_host_audio_frames: u64 = 0;
++    let mut previous_host_audio_bytes: u64 = 0;
++
+     let mut ws_stopped = false;
+ 
+     loop {
+@@ -281,12 +385,19 @@ async fn ws_loop(
+                             continue;
+                         }
+ 
++                        host_audio_frames += 1;
++                        host_audio_bytes += frame.buffer.len() as u64;
++
+                         let mut buffer = vec![0; 1 + frame.buffer.len()];
+                         buffer[1..].copy_from_slice(&frame.buffer);
+ 
+                         buffer[0] = WebSocketChannel::AUDIO;
+ 
+-                        let _ = ws_sender.send(WsData::Bytes(buffer.into()));
++                        if let Err(err) = relay_sender.try_send(WsData::Bytes(buffer.into()))
++                            && handle_relay_error(err, &relay_sender, &mut stream, &relay_metrics)
++                        {
++                            break;
++                        }
+                     }
+                     MoonlightStreamEvent::Video(VideoStreamEvent::SignalIdr) => {
+                         if let Err(err)=  stream.send_raw(ControlPacket::RequestIdr) {
+@@ -298,6 +409,15 @@ async fn ws_loop(
+                             continue;
+                         }
+ 
++                        let received_at = Instant::now();
++                        if let Some(previous) = host_last_video_at {
++                            host_video_receive_gap_max =
++                                host_video_receive_gap_max.max(received_at - previous);
++                        }
++                        host_last_video_at = Some(received_at);
++                        host_video_frames += 1;
++                        host_video_bytes += frame.raw().len() as u64;
++
+                         // TODO: avoid using payloading and depayloading the frame like this
+                         let mut buffer = vec![0; 1 + 5 + frame.raw().len()];
+                         buffer[(1 + 5)..].copy_from_slice(frame.raw());
+@@ -313,9 +433,17 @@ async fn ws_loop(
+                             &(frame.metadata().timestamp.as_micros() as u32).to_be_bytes(),
+                         );
+ 
+-                        let _ = ws_sender.send(WsData::Bytes(buffer.into()));
++                        if let Err(err) = relay_sender.try_send(WsData::Bytes(buffer.into()))
++                            && handle_relay_error(err, &relay_sender, &mut stream, &relay_metrics)
++                        {
++                            break;
++                        }
+                     }
+                     MoonlightStreamEvent::Control(ControlStreamEvent::Packet(packet)) => {
++                        if ws_stopped {
++                            continue;
++                        }
++
+                         let mut buffer = vec![0; ControlPacket::MAX_SIZE + 1];
+ 
+                         buffer[0] = WebSocketChannel::CONTROL;
+@@ -326,13 +454,22 @@ async fn ws_loop(
+                             .unwrap();
+ 
+                         buffer.truncate(1 + packet_len);
+-                        let _ = ws_sender.send(WsData::Bytes(buffer.into()));
++
++                        if let Err(err) = relay_sender.try_send(WsData::Bytes(buffer.into()))
++                            && handle_relay_error(err, &relay_sender, &mut stream, &relay_metrics)
++                        {
++                            break;
++                        }
+                     }
+                     _ => {}
+                 }
+             }
+             // relay stats
+             _ = relay_stats_ticker.tick() => {
++                if ws_stopped {
++                    continue;
++                }
++
+                 let rtt = match stream.estimated_rtt() {
+                     Ok(value) => value,
+                     Err(err) => {
+@@ -341,13 +478,69 @@ async fn ws_loop(
+                     }
+                 };
+ 
+-                send_ws_message(
+-                    &mut ws_sender,
++                if let Err(err) = send_ws_message(
++                    &relay_sender,
+                     WebSocketClientboundMessage::Stats(StreamStatsClientboundMessage::RelayRtt {
+                         rtt_ms: rtt.rtt.as_millis() as u32,
+                         rtt_variance_ms: rtt.rtt_variance.as_millis() as u32,
+                     })
++                ) && handle_relay_error(err, &relay_sender, &mut stream, &relay_metrics)
++                {
++                    break;
++                }
++
++                // once-per-second aggregated telemetry: counts, sizes and timings only.
++                let now = relay_metrics.snapshot();
++                let window = relay_metrics.take_window();
++                let summary = format_summary(
++                    &now,
++                    &previous_snapshot,
++                    &window,
++                    relay_sender.config().max_queued_bytes,
+                 );
++                let high_water = window.max_queued_bytes.saturating_mul(4)
++                    >= relay_sender.config().max_queued_bytes.saturating_mul(3);
++                let active = now.queued_bytes > 0
++                    || window.max_frame_bytes > 0
++                    || now.enqueued_frames != previous_snapshot.enqueued_frames
++                    || now.sent_frames != previous_snapshot.sent_frames;
++                if window.slow_sends > 0 || high_water {
++                    warn!("{summary}");
++                } else if active {
++                    info!("{summary}");
++                } else {
++                    debug!("{summary}");
++                }
++                previous_snapshot = now;
++
++                // host -> relay telemetry. `relay 1s` above only measures the
++                // relay -> browser queue, so compare these numbers with the
++                // configured bitrate to tell "the host sends too much" apart
++                // from "the browser cannot keep up".
++                let window_video_frames = host_video_frames - previous_host_video_frames;
++                let window_video_bytes = host_video_bytes - previous_host_video_bytes;
++                let window_audio_frames = host_audio_frames - previous_host_audio_frames;
++                let window_audio_bytes = host_audio_bytes - previous_host_audio_bytes;
++                previous_host_video_frames = host_video_frames;
++                previous_host_video_bytes = host_video_bytes;
++                previous_host_audio_frames = host_audio_frames;
++                previous_host_audio_bytes = host_audio_bytes;
++
++                if window_video_frames > 0 || window_audio_frames > 0 {
++                    info!(
++                        "host->relay 1s: video={}f/{}kbps audio={}f/{}kbps \
++                         video_gap_max={}ms host_rtt={}ms (payload only, FEC/IP overhead excluded)",
++                        window_video_frames,
++                        window_video_bytes * 8 / 1000,
++                        window_audio_frames,
++                        window_audio_bytes * 8 / 1000,
++                        host_video_receive_gap_max.as_millis(),
++                        rtt.rtt.as_millis(),
++                    );
++                } else {
++                    debug!("host->relay 1s: no video or audio payload received");
++                }
++                host_video_receive_gap_max = Duration::ZERO;
+             }
+             // Handle incoming ws requests
+             result = ws_receiver.recv(), if !ws_stopped => {
+@@ -389,8 +582,10 @@ async fn ws_loop(
+ 
+                         if let WebSocketServerboundMessage::Stats(StreamStatsServerboundMessage::Ping(id)) =
+                             message
++                            && let Err(err) = send_ws_message(&relay_sender, WebSocketClientboundMessage::Stats(StreamStatsClientboundMessage::Pong(id)))
++                            && handle_relay_error(err, &relay_sender, &mut stream, &relay_metrics)
+                         {
+-                            send_ws_message(&mut ws_sender, WebSocketClientboundMessage::Stats(StreamStatsClientboundMessage::Pong(id)));
++                            break;
+                         }
+                     }
+                     Message::Close(_) => {
+@@ -412,23 +607,18 @@ async fn ws_loop(
+ }
+ 
+ fn send_ws_message(
+-    sender: &mut UnboundedSender<WsData>,
++    sender: &RelaySender,
+     message: WebSocketClientboundMessage,
+-) -> bool {
++) -> Result<(), RelaySendError> {
+     trace!(message = ?message, "sending text message to client");
+ 
+     let text = match serde_json::to_string(&message) {
+         Ok(value) => value,
+         Err(err) => {
+-            warn!(error = %err, "failed to send web socket message");
+-            return false;
++            warn!(error = %err, "failed to serialize web socket message");
++            return Err(RelaySendError::Closed);
+         }
+     };
+ 
+-    if let Err(err) = sender.send(WsData::Text(text)) {
+-        warn!(error = %err, "failed to send web socket message");
+-        return false;
+-    }
+-
+-    true
++    sender.try_send(WsData::Text(text))
+ }
+diff --git a/src/api/stream/webrtc/mod.rs b/src/api/stream/webrtc/mod.rs
+index 8877b6f..288fc83 100644
+--- a/src/api/stream/webrtc/mod.rs
++++ b/src/api/stream/webrtc/mod.rs
+@@ -461,7 +461,7 @@ pub async fn webrtc_post(
+         fps: session.fps,
+         fps_x100: session.fps * 100,
+         bitrate: session.bitrate,
+-        packet_size: 2048,
++        packet_size: app.config().moonlight.packet_size,
+         // There's not need to encrypt video
+         encryption_flags: EncryptionFlags::AUDIO | EncryptionFlags::FOUNDATION_MICROPHONE,
+         streaming_remotely: StreamingConfig::Auto,
+@@ -487,6 +487,11 @@ pub async fn webrtc_post(
+     let server_version = host.version().await?;
+     let gfe_version = host.gfe_version().await?;
+     let server_codec_mode_support = host.server_codec_mode_support().await?;
++    settings.supported_video_formats = super::select_video_formats(
++        settings.supported_video_formats,
++        session.preferred_codecs.unwrap_or(VideoFormats::all()),
++        server_codec_mode_support,
++    );
+     settings.adjust_for_server(server_version, &gfe_version, server_codec_mode_support)?;
+ 
+     // Generate key and iv
+diff --git a/src/api/stream/ws_relay.rs b/src/api/stream/ws_relay.rs
+new file mode 100644
+index 0000000..a0387bf
+--- /dev/null
++++ b/src/api/stream/ws_relay.rs
+@@ -0,0 +1,737 @@
++//! Bounded, byte-accounted outbound relay queue for the WebSocket stream transport.
++//!
++//! The relay reads Moonlight frames from the Sunshine UDP stream and forwards them
++//! to the browser over a WebSocket (TCP, usually through Cloudflare). The UDP driver
++//! must never be stalled by a slow TCP peer, but letting an unbounded queue grow is
++//! not acceptable either: an unresponsive client would make the server grow without
++//! limit.
++//!
++//! This module provides a queue with a hard byte budget and a hard frame-count
++//! budget. Enqueueing is synchronous (`try_send`) so the Moonlight stream keeps
++//! being driven; when the budget is exhausted the caller is expected to terminate
++//! the congested session gracefully instead of silently dropping frames or blocking
++//! the UDP driver. Frames are never dropped while the queue is healthy: the client
++//! protocol is unchanged, and a dropped video delta would need an explicit IDR
++//! resync that this transport does not implement.
++//!
++//! Every queued frame owns a [`QueuePermit`]. The permit releases both the counted
++//! bytes and the semaphore slot on drop, so byte accounting stays correct when a
++//! frame is sent, when a send fails, or when the sender task is cancelled/dropped.
++
++use std::{
++    sync::{
++        Arc,
++        atomic::{AtomicU64, AtomicUsize, Ordering},
++    },
++    time::{Duration, Instant},
++};
++
++use bytes::Bytes;
++use tokio::sync::{
++    OwnedSemaphorePermit, Semaphore, TryAcquireError,
++    mpsc::{self, error::TrySendError},
++};
++
++use crate::api::bindings::WebSocketChannel;
++
++/// A send is considered slow once it takes at least this long.
++pub const SLOW_SEND_THRESHOLD: Duration = Duration::from_millis(250);
++
++/// Maximum number of bytes that may be queued (or in flight) at once.
++pub const DEFAULT_MAX_QUEUED_BYTES: usize = 16 * 1024 * 1024;
++/// Maximum size of a single frame. Larger frames are rejected and the session is
++/// terminated instead of being queued (an oversized frame can never fit the budget).
++pub const DEFAULT_MAX_FRAME_BYTES: usize = 8 * 1024 * 1024;
++/// Hard upper bound on queued frames, as a safety net for pathological traffic made
++/// of very small frames. The byte budget is normally the binding limit.
++pub const DEFAULT_MAX_QUEUED_FRAMES: usize = 4096;
++
++/// Queue bounds. All channels (video, audio, control and stats/text) share the same
++/// budget, so none of them can grow without bound.
++#[derive(Clone, Copy, Debug)]
++pub struct RelayQueueConfig {
++    pub max_queued_bytes: usize,
++    pub max_frame_bytes: usize,
++    pub max_queued_frames: usize,
++}
++
++impl Default for RelayQueueConfig {
++    fn default() -> Self {
++        Self {
++            max_queued_bytes: DEFAULT_MAX_QUEUED_BYTES,
++            max_frame_bytes: DEFAULT_MAX_FRAME_BYTES,
++            max_queued_frames: DEFAULT_MAX_QUEUED_FRAMES,
++        }
++    }
++}
++
++/// Logical channel a queued frame belongs to, derived from the wire channel byte.
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++pub enum RelayKind {
++    Control,
++    Video,
++    Audio,
++    Text,
++}
++
++impl RelayKind {
++    fn index(self) -> usize {
++        match self {
++            Self::Control => 0,
++            Self::Video => 1,
++            Self::Audio => 2,
++            Self::Text => 3,
++        }
++    }
++
++    pub fn label(self) -> &'static str {
++        match self {
++            Self::Control => "control",
++            Self::Video => "video",
++            Self::Audio => "audio",
++            Self::Text => "text",
++        }
++    }
++
++    const ALL: [Self; 4] = [Self::Control, Self::Video, Self::Audio, Self::Text];
++}
++
++/// Payload queued for delivery to the client. The wire format is unchanged.
++pub enum WsData {
++    Bytes(Bytes),
++    Text(String),
++}
++
++impl WsData {
++    #[allow(clippy::len_without_is_empty)]
++    pub fn len(&self) -> usize {
++        match self {
++            Self::Bytes(bytes) => bytes.len(),
++            Self::Text(text) => text.len(),
++        }
++    }
++
++    pub fn kind(&self) -> RelayKind {
++        match self {
++            Self::Text(_) => RelayKind::Text,
++            Self::Bytes(bytes) => match bytes.first().copied() {
++                Some(WebSocketChannel::VIDEO) => RelayKind::Video,
++                Some(WebSocketChannel::AUDIO) => RelayKind::Audio,
++                Some(WebSocketChannel::CONTROL) => RelayKind::Control,
++                // Unknown channel byte: treat as control so it is still bounded and
++                // never silently discarded.
++                _ => RelayKind::Control,
++            },
++        }
++    }
++}
++
++/// Why a frame could not be queued.
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++pub enum QueueFullReason {
++    Bytes,
++    Frames,
++}
++
++impl std::fmt::Display for QueueFullReason {
++    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
++        match self {
++            Self::Bytes => f.write_str("byte budget exhausted"),
++            Self::Frames => f.write_str("frame budget exhausted"),
++        }
++    }
++}
++
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++pub enum RelaySendError {
++    /// The sender task is gone (client disconnected, send failed or task cancelled).
++    Closed,
++    /// The queue budget is exhausted; the session must be terminated.
++    Full { reason: QueueFullReason },
++    /// A single frame exceeds the per-frame limit; the session must be terminated.
++    FrameTooLarge { size: usize, limit: usize },
++}
++
++impl std::fmt::Display for RelaySendError {
++    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
++        match self {
++            Self::Closed => f.write_str("relay queue closed"),
++            Self::Full { reason } => write!(f, "relay queue full ({reason})"),
++            Self::FrameTooLarge { size, limit } => write!(
++                f,
++                "relay frame of {size} bytes exceeds the per-frame limit of {limit} bytes"
++            ),
++        }
++    }
++}
++
++impl std::error::Error for RelaySendError {}
++
++/// Cumulative counters plus current gauges. Cheap to clone/copy.
++#[derive(Clone, Copy, Debug, Default)]
++pub struct RelaySnapshot {
++    pub queued_bytes: usize,
++    pub queued_frames: usize,
++    pub enqueued_frames: u64,
++    pub enqueued_bytes: u64,
++    pub sent_frames: u64,
++    pub sent_bytes: u64,
++    pub rejected_full: u64,
++    pub rejected_oversize: u64,
++    pub send_errors: u64,
++    pub sent_frames_per_kind: [u64; 4],
++    pub sent_bytes_per_kind: [u64; 4],
++}
++
++/// Extremes observed since the previous call to [`RelayMetrics::take_window`].
++#[derive(Clone, Copy, Debug, Default)]
++pub struct RelayWindow {
++    pub max_queued_bytes: usize,
++    pub max_frame_bytes: usize,
++    pub max_residence_us: u64,
++    pub max_send_us: u64,
++    pub slow_sends: u64,
++}
++
++pub struct RelayMetrics {
++    queued_bytes: AtomicUsize,
++    queued_frames: AtomicUsize,
++    peak_queued_bytes: AtomicUsize,
++
++    enqueued_frames: AtomicU64,
++    enqueued_bytes: AtomicU64,
++    sent_frames: AtomicU64,
++    sent_bytes: AtomicU64,
++    rejected_full: AtomicU64,
++    rejected_oversize: AtomicU64,
++    send_errors: AtomicU64,
++
++    sent_frames_per_kind: [AtomicU64; 4],
++    sent_bytes_per_kind: [AtomicU64; 4],
++
++    window_max_queued_bytes: AtomicUsize,
++    window_max_frame_bytes: AtomicUsize,
++    window_max_residence_us: AtomicU64,
++    window_max_send_us: AtomicU64,
++    window_slow_sends: AtomicU64,
++}
++
++impl Default for RelayMetrics {
++    fn default() -> Self {
++        Self {
++            queued_bytes: AtomicUsize::new(0),
++            queued_frames: AtomicUsize::new(0),
++            peak_queued_bytes: AtomicUsize::new(0),
++            enqueued_frames: AtomicU64::new(0),
++            enqueued_bytes: AtomicU64::new(0),
++            sent_frames: AtomicU64::new(0),
++            sent_bytes: AtomicU64::new(0),
++            rejected_full: AtomicU64::new(0),
++            rejected_oversize: AtomicU64::new(0),
++            send_errors: AtomicU64::new(0),
++            sent_frames_per_kind: std::array::from_fn(|_| AtomicU64::new(0)),
++            sent_bytes_per_kind: std::array::from_fn(|_| AtomicU64::new(0)),
++            window_max_queued_bytes: AtomicUsize::new(0),
++            window_max_frame_bytes: AtomicUsize::new(0),
++            window_max_residence_us: AtomicU64::new(0),
++            window_max_send_us: AtomicU64::new(0),
++            window_slow_sends: AtomicU64::new(0),
++        }
++    }
++}
++
++impl RelayMetrics {
++    pub fn snapshot(&self) -> RelaySnapshot {
++        RelaySnapshot {
++            queued_bytes: self.queued_bytes.load(Ordering::Acquire),
++            queued_frames: self.queued_frames.load(Ordering::Acquire),
++            enqueued_frames: self.enqueued_frames.load(Ordering::Relaxed),
++            enqueued_bytes: self.enqueued_bytes.load(Ordering::Relaxed),
++            sent_frames: self.sent_frames.load(Ordering::Relaxed),
++            sent_bytes: self.sent_bytes.load(Ordering::Relaxed),
++            rejected_full: self.rejected_full.load(Ordering::Relaxed),
++            rejected_oversize: self.rejected_oversize.load(Ordering::Relaxed),
++            send_errors: self.send_errors.load(Ordering::Relaxed),
++            sent_frames_per_kind: self
++                .sent_frames_per_kind
++                .each_ref()
++                .map(|value| value.load(Ordering::Relaxed)),
++            sent_bytes_per_kind: self
++                .sent_bytes_per_kind
++                .each_ref()
++                .map(|value| value.load(Ordering::Relaxed)),
++        }
++    }
++
++    /// Returns the extremes since the previous call and resets them.
++    pub fn take_window(&self) -> RelayWindow {
++        RelayWindow {
++            max_queued_bytes: self.window_max_queued_bytes.swap(0, Ordering::Relaxed),
++            max_frame_bytes: self.window_max_frame_bytes.swap(0, Ordering::Relaxed),
++            max_residence_us: self.window_max_residence_us.swap(0, Ordering::Relaxed),
++            max_send_us: self.window_max_send_us.swap(0, Ordering::Relaxed),
++            slow_sends: self.window_slow_sends.swap(0, Ordering::Relaxed),
++        }
++    }
++
++    pub fn record_sent(&self, kind: RelayKind, size: usize, residence: Duration, send: Duration) {
++        self.sent_frames.fetch_add(1, Ordering::Relaxed);
++        self.sent_bytes.fetch_add(size as u64, Ordering::Relaxed);
++        let index = kind.index();
++        self.sent_frames_per_kind[index].fetch_add(1, Ordering::Relaxed);
++        self.sent_bytes_per_kind[index].fetch_add(size as u64, Ordering::Relaxed);
++
++        self.window_max_residence_us
++            .fetch_max(to_micros(residence), Ordering::Relaxed);
++        let send_us = to_micros(send);
++        self.window_max_send_us.fetch_max(send_us, Ordering::Relaxed);
++        if send >= SLOW_SEND_THRESHOLD {
++            self.window_slow_sends.fetch_add(1, Ordering::Relaxed);
++        }
++    }
++
++    pub fn record_send_error(&self) {
++        self.send_errors.fetch_add(1, Ordering::Relaxed);
++    }
++
++    pub fn peak_queued_bytes(&self) -> usize {
++        self.peak_queued_bytes.load(Ordering::Relaxed)
++    }
++}
++
++fn to_micros(duration: Duration) -> u64 {
++    duration.as_micros().min(u64::MAX as u128) as u64
++}
++
++/// RAII byte reservation. Releasing is unconditional and happens exactly once, even
++/// if the frame is never sent because the send failed or the task was cancelled.
++struct QueuePermit {
++    metrics: Arc<RelayMetrics>,
++    bytes: usize,
++    _semaphore: OwnedSemaphorePermit,
++}
++
++impl Drop for QueuePermit {
++    fn drop(&mut self) {
++        self.metrics.queued_frames.fetch_sub(1, Ordering::AcqRel);
++        self.metrics.queued_bytes.fetch_sub(self.bytes, Ordering::AcqRel);
++    }
++}
++
++/// A frame handed to the sender task. Dropping it releases its queue reservation.
++pub struct QueuedFrame {
++    pub data: WsData,
++    pub kind: RelayKind,
++    pub size: usize,
++    pub enqueued_at: Instant,
++    _permit: QueuePermit,
++}
++
++pub struct RelaySender {
++    tx: mpsc::Sender<QueuedFrame>,
++    budget: Arc<Semaphore>,
++    metrics: Arc<RelayMetrics>,
++    config: RelayQueueConfig,
++}
++
++impl RelaySender {
++    /// Non-blocking enqueue. Never awaits, so the Moonlight UDP driver is not stalled.
++    pub fn try_send(&self, data: WsData) -> Result<(), RelaySendError> {
++        let size = data.len().max(1);
++        if size > self.config.max_frame_bytes {
++            self.metrics.rejected_oversize.fetch_add(1, Ordering::Relaxed);
++            return Err(RelaySendError::FrameTooLarge {
++                size: data.len(),
++                limit: self.config.max_frame_bytes,
++            });
++        }
++
++        let permit = match self.budget.clone().try_acquire_many_owned(size as u32) {
++            Ok(permit) => permit,
++            Err(TryAcquireError::NoPermits) => {
++                self.metrics.rejected_full.fetch_add(1, Ordering::Relaxed);
++                return Err(RelaySendError::Full {
++                    reason: QueueFullReason::Bytes,
++                });
++            }
++            Err(TryAcquireError::Closed) => return Err(RelaySendError::Closed),
++        };
++
++        let queued = self
++            .metrics
++            .queued_bytes
++            .fetch_add(size, Ordering::AcqRel)
++            .saturating_add(size);
++        self.metrics.queued_frames.fetch_add(1, Ordering::AcqRel);
++        self.metrics
++            .window_max_queued_bytes
++            .fetch_max(queued, Ordering::Relaxed);
++        self.metrics
++            .window_max_frame_bytes
++            .fetch_max(size, Ordering::Relaxed);
++
++        let kind = data.kind();
++        let frame = QueuedFrame {
++            data,
++            kind,
++            size,
++            enqueued_at: Instant::now(),
++            _permit: QueuePermit {
++                metrics: self.metrics.clone(),
++                bytes: size,
++                _semaphore: permit,
++            },
++        };
++
++        match self.tx.try_send(frame) {
++            Ok(()) => {
++                self.metrics.enqueued_frames.fetch_add(1, Ordering::Relaxed);
++                self.metrics
++                    .enqueued_bytes
++                    .fetch_add(size as u64, Ordering::Relaxed);
++                Ok(())
++            }
++            Err(TrySendError::Full(frame)) => {
++                drop(frame);
++                self.metrics.rejected_full.fetch_add(1, Ordering::Relaxed);
++                Err(RelaySendError::Full {
++                    reason: QueueFullReason::Frames,
++                })
++            }
++            Err(TrySendError::Closed(frame)) => {
++                drop(frame);
++                Err(RelaySendError::Closed)
++            }
++        }
++    }
++
++    pub fn metrics(&self) -> Arc<RelayMetrics> {
++        self.metrics.clone()
++    }
++
++    pub fn config(&self) -> RelayQueueConfig {
++        self.config
++    }
++}
++
++/// Consumer half. Dropping it closes the channel, which releases every still-queued
++/// frame reservation and makes producers observe [`RelaySendError::Closed`].
++pub struct RelayReceiver {
++    rx: mpsc::Receiver<QueuedFrame>,
++    metrics: Arc<RelayMetrics>,
++}
++
++impl RelayReceiver {
++    pub async fn recv(&mut self) -> Option<QueuedFrame> {
++        self.rx.recv().await
++    }
++
++    pub fn metrics(&self) -> Arc<RelayMetrics> {
++        self.metrics.clone()
++    }
++}
++
++/// Creates the bounded queue and its metrics.
++pub fn new_queue(config: RelayQueueConfig) -> (RelaySender, RelayReceiver) {
++    let max_queued_bytes = config.max_queued_bytes.max(1);
++    let max_frame_bytes = config.max_frame_bytes.min(max_queued_bytes);
++    let max_queued_frames = config.max_queued_frames.max(1);
++    let config = RelayQueueConfig {
++        max_queued_bytes,
++        max_frame_bytes,
++        max_queued_frames,
++    };
++
++    let (tx, rx) = mpsc::channel(max_queued_frames);
++    let metrics = Arc::new(RelayMetrics::default());
++    let budget = Arc::new(Semaphore::new(max_queued_bytes));
++
++    (
++        RelaySender {
++            tx,
++            budget,
++            metrics: metrics.clone(),
++            config,
++        },
++        RelayReceiver { rx, metrics },
++    )
++}
++
++/// Formats a once-per-second aggregated summary. Contains only counts, sizes and
++/// timings, never frame content or credentials.
++pub fn format_summary(
++    now: &RelaySnapshot,
++    prev: &RelaySnapshot,
++    window: &RelayWindow,
++    max_queued_bytes: usize,
++) -> String {
++    let delta = |cur: u64, old: u64| cur.saturating_sub(old);
++    let mut per_kind = String::new();
++    for kind in RelayKind::ALL {
++        let index = kind.index();
++        let frames = delta(now.sent_frames_per_kind[index], prev.sent_frames_per_kind[index]);
++        let bytes = delta(now.sent_bytes_per_kind[index], prev.sent_bytes_per_kind[index]);
++        if frames > 0 {
++            use std::fmt::Write as _;
++            let _ = write!(per_kind, " {}={}f/{}B", kind.label(), frames, bytes);
++        }
++    }
++
++    format!(
++        "relay 1s: queued={}B/{}f peak={}B/{}B max_frame={}B window_peak={}B \
++         enqueued={}f/{}B sent={}f/{}B rejected_full={} rejected_oversize={} send_errors={} \
++         residence_max={}ms send_max={}ms slow_sends={}{}",
++        now.queued_bytes,
++        now.queued_frames,
++        now.queued_bytes.max(window.max_queued_bytes),
++        max_queued_bytes,
++        window.max_frame_bytes,
++        window.max_queued_bytes,
++        delta(now.enqueued_frames, prev.enqueued_frames),
++        delta(now.enqueued_bytes, prev.enqueued_bytes),
++        delta(now.sent_frames, prev.sent_frames),
++        delta(now.sent_bytes, prev.sent_bytes),
++        delta(now.rejected_full, prev.rejected_full),
++        delta(now.rejected_oversize, prev.rejected_oversize),
++        delta(now.send_errors, prev.send_errors),
++        window.max_residence_us / 1000,
++        window.max_send_us / 1000,
++        window.slow_sends,
++        per_kind,
++    )
++}
++
++#[cfg(test)]
++mod tests {
++    #![allow(clippy::unwrap_used)]
++
++    use super::*;
++
++    fn bytes(channel: u8, len: usize) -> WsData {
++        let mut buffer = vec![channel];
++        buffer.resize(len.max(1), 0);
++        WsData::Bytes(Bytes::from(buffer))
++    }
++
++    fn small_config() -> RelayQueueConfig {
++        RelayQueueConfig {
++            max_queued_bytes: 1000,
++            max_frame_bytes: 400,
++            max_queued_frames: 8,
++        }
++    }
++
++    #[test]
++    fn byte_accounting_releases_on_frame_drop() {
++        let (sender, mut receiver) = new_queue(small_config());
++        let metrics = sender.metrics();
++
++        sender.try_send(bytes(WebSocketChannel::VIDEO, 300)).unwrap();
++        assert_eq!(metrics.snapshot().queued_bytes, 300);
++        assert_eq!(metrics.snapshot().queued_frames, 1);
++
++        // Dequeued but not dropped yet: the reservation is still held.
++        let frame = receiver.rx.try_recv().unwrap();
++        assert_eq!(frame.size, 300);
++        assert_eq!(metrics.snapshot().queued_bytes, 300);
++
++        drop(frame);
++        assert_eq!(metrics.snapshot().queued_bytes, 0);
++        assert_eq!(metrics.snapshot().queued_frames, 0);
++    }
++
++    #[test]
++    fn queue_limit_rejects_over_byte_budget() {
++        let config = RelayQueueConfig {
++            max_queued_bytes: 500,
++            max_frame_bytes: 400,
++            max_queued_frames: 8,
++        };
++        let (sender, mut receiver) = new_queue(config);
++        let metrics = sender.metrics();
++
++        sender.try_send(bytes(WebSocketChannel::VIDEO, 400)).unwrap();
++        let err = sender.try_send(bytes(WebSocketChannel::VIDEO, 200)).unwrap_err();
++        assert_eq!(
++            err,
++            RelaySendError::Full {
++                reason: QueueFullReason::Bytes
++            }
++        );
++        assert_eq!(metrics.snapshot().rejected_full, 1);
++
++        // Releasing the first frame makes room again.
++        drop(receiver.rx.try_recv().unwrap());
++        sender.try_send(bytes(WebSocketChannel::AUDIO, 200)).unwrap();
++        assert_eq!(metrics.snapshot().queued_bytes, 200);
++    }
++
++    #[test]
++    fn frame_count_budget_is_enforced() {
++        let config = RelayQueueConfig {
++            max_queued_bytes: 1_000_000,
++            max_frame_bytes: 1000,
++            max_queued_frames: 2,
++        };
++        let (sender, mut receiver) = new_queue(config);
++
++        sender.try_send(bytes(WebSocketChannel::AUDIO, 1)).unwrap();
++        sender.try_send(bytes(WebSocketChannel::AUDIO, 1)).unwrap();
++        let err = sender.try_send(bytes(WebSocketChannel::AUDIO, 1)).unwrap_err();
++        assert_eq!(
++            err,
++            RelaySendError::Full {
++                reason: QueueFullReason::Frames
++            }
++        );
++
++        // Dropping a received frame frees a slot.
++        drop(receiver.rx.try_recv().unwrap());
++        sender.try_send(bytes(WebSocketChannel::AUDIO, 1)).unwrap();
++    }
++
++    #[test]
++    fn oversized_single_frame_is_rejected_without_queueing() {
++        let (sender, _receiver) = new_queue(small_config());
++        let metrics = sender.metrics();
++
++        assert_eq!(
++            sender.try_send(bytes(WebSocketChannel::VIDEO, 401)).unwrap_err(),
++            RelaySendError::FrameTooLarge { size: 401, limit: 400 }
++        );
++        // Exactly at the limit is accepted.
++        sender.try_send(bytes(WebSocketChannel::VIDEO, 400)).unwrap();
++
++        let snapshot = metrics.snapshot();
++        assert_eq!(snapshot.rejected_oversize, 1);
++        assert_eq!(snapshot.queued_bytes, 400);
++    }
++
++    #[test]
++    fn closed_channel_reports_closed() {
++        let (sender, receiver) = new_queue(small_config());
++        drop(receiver);
++        assert_eq!(
++            sender.try_send(bytes(WebSocketChannel::VIDEO, 10)).unwrap_err(),
++            RelaySendError::Closed
++        );
++    }
++
++    #[test]
++    fn cancelled_receiver_releases_all_reservations() {
++        let (sender, receiver) = new_queue(small_config());
++        let metrics = sender.metrics();
++
++        sender.try_send(bytes(WebSocketChannel::VIDEO, 200)).unwrap();
++        sender.try_send(bytes(WebSocketChannel::AUDIO, 100)).unwrap();
++        assert_eq!(metrics.snapshot().queued_bytes, 300);
++
++        // Simulates the sender task being cancelled/dropped while frames are queued:
++        // the receiver (and its buffered frames) is dropped, so every permit releases.
++        drop(receiver);
++        assert_eq!(metrics.snapshot().queued_bytes, 0);
++        assert_eq!(metrics.snapshot().queued_frames, 0);
++        assert_eq!(
++            sender.try_send(bytes(WebSocketChannel::VIDEO, 10)).unwrap_err(),
++            RelaySendError::Closed
++        );
++    }
++
++    #[test]
++    fn all_channel_kinds_share_the_byte_budget() {
++        let config = RelayQueueConfig {
++            max_queued_bytes: 100,
++            max_frame_bytes: 100,
++            max_queued_frames: 16,
++        };
++        let (sender, _receiver) = new_queue(config);
++        let metrics = sender.metrics();
++
++        sender.try_send(bytes(WebSocketChannel::VIDEO, 40)).unwrap();
++        sender.try_send(bytes(WebSocketChannel::AUDIO, 30)).unwrap();
++        sender.try_send(bytes(WebSocketChannel::CONTROL, 20)).unwrap();
++        sender.try_send(WsData::Text("{}".to_owned())).unwrap();
++        assert_eq!(metrics.snapshot().queued_bytes, 92);
++
++        let err = sender.try_send(bytes(WebSocketChannel::AUDIO, 10)).unwrap_err();
++        assert_eq!(
++            err,
++            RelaySendError::Full {
++                reason: QueueFullReason::Bytes
++            }
++        );
++    }
++
++    #[test]
++    fn kinds_are_derived_from_wire_channel() {
++        assert_eq!(bytes(WebSocketChannel::VIDEO, 4).kind(), RelayKind::Video);
++        assert_eq!(bytes(WebSocketChannel::AUDIO, 4).kind(), RelayKind::Audio);
++        assert_eq!(bytes(WebSocketChannel::CONTROL, 4).kind(), RelayKind::Control);
++        assert_eq!(WsData::Text("x".to_owned()).kind(), RelayKind::Text);
++    }
++
++    #[test]
++    fn metrics_record_sent_and_errors() {
++        let (sender, receiver) = new_queue(small_config());
++        let metrics = sender.metrics();
++
++        metrics.record_sent(
++            RelayKind::Video,
++            123,
++            Duration::from_millis(10),
++            Duration::from_millis(1),
++        );
++        metrics.record_sent(
++            RelayKind::Video,
++            100,
++            Duration::from_millis(20),
++            Duration::from_millis(300),
++        );
++        metrics.record_send_error();
++
++        let snapshot = metrics.snapshot();
++        assert_eq!(snapshot.sent_frames, 2);
++        assert_eq!(snapshot.sent_bytes, 223);
++        assert_eq!(snapshot.sent_frames_per_kind[RelayKind::Video.index()], 2);
++        assert_eq!(snapshot.send_errors, 1);
++
++        let window = metrics.take_window();
++        assert_eq!(window.max_residence_us, 20_000);
++        assert_eq!(window.max_send_us, 300_000);
++        assert_eq!(window.slow_sends, 1);
++        // take_window resets the window.
++        assert_eq!(metrics.take_window().slow_sends, 0);
++
++        drop(receiver);
++    }
++
++    #[test]
++    fn summary_reports_deltas_and_bounds() {
++        let (sender, receiver) = new_queue(small_config());
++        let metrics = sender.metrics();
++        let prev = metrics.snapshot();
++
++        sender.try_send(bytes(WebSocketChannel::VIDEO, 300)).unwrap();
++        let now = metrics.snapshot();
++        let window = metrics.take_window();
++        let summary = format_summary(&now, &prev, &window, small_config().max_queued_bytes);
++
++        assert!(summary.contains("enqueued=1f/300B"), "{summary}");
++        assert!(summary.contains("queued=300B/1f"), "{summary}");
++        assert!(summary.contains("max_frame=300B"), "{summary}");
++        assert!(!summary.contains("video=0f"), "{summary}");
++        drop(receiver);
++    }
++
++    #[test]
++    fn config_clamps_frame_limit_to_byte_budget() {
++        let config = RelayQueueConfig {
++            max_queued_bytes: 64,
++            max_frame_bytes: 4096,
++            max_queued_frames: 0,
++        };
++        let (sender, _receiver) = new_queue(config);
++        assert_eq!(sender.config().max_frame_bytes, 64);
++        assert_eq!(sender.config().max_queued_frames, 1);
++    }
++}
+diff --git a/src/cli.rs b/src/cli.rs
+index 2840e7b..0740a0a 100644
+--- a/src/cli.rs
++++ b/src/cli.rs
+@@ -112,6 +112,11 @@ pub struct CliConfig {
+     /// Overwrites `log.log_file_path`.
+     #[arg(long, env = "LOG_FILE")]
+     pub log_file: Option<String>,
++    /// Overwrites `moonlight.packet_size` (video packet payload size requested
++    /// from the Moonlight host). Lower it when the host -> relay path has a
++    /// smaller MTU, e.g. 1236 for a Tailscale/WireGuard 1280 byte tunnel.
++    #[arg(long, env = "MOONLIGHT_PACKET_SIZE")]
++    pub moonlight_packet_size: Option<u32>,
+     /// Disables the STUN ice server which are bundled by default.
+     /// This only disables the generation of them in the first config.
+     /// After the config.json has been generated the ice servers in the config will be used regardless if this is set.
+@@ -183,6 +188,9 @@ impl CliConfig {
+         if let Some(log_file) = self.log_file {
+             config.log.file_path = Some(log_file);
+         }
++        if let Some(moonlight_packet_size) = self.moonlight_packet_size {
++            config.moonlight.packet_size = moonlight_packet_size;
++        }
+         if self.disable_default_webrtc_ice_servers {
+             config
+                 .webrtc
+diff --git a/src/config.rs b/src/config.rs
+index 1d865a5..3dad23f 100644
+--- a/src/config.rs
++++ b/src/config.rs
+@@ -245,6 +245,13 @@ pub struct MoonlightConfig {
+     pub default_http_port: u16,
+     #[serde(default = "default_pair_device_name")]
+     pub pair_device_name: String,
++    /// Video packet payload size requested from the Moonlight host.
++    ///
++    /// See [VIDEO_PACKET_SIZE](crate::api::stream::VIDEO_PACKET_SIZE) for the
++    /// MTU math: lower this if the host -> relay path has a smaller MTU than the
++    /// default (1280 byte tunnels like Tailscale/WireGuard are the common case).
++    #[serde(default = "default_moonlight_packet_size")]
++    pub packet_size: u32,
+ }
+ 
+ impl Default for MoonlightConfig {
+@@ -252,10 +259,15 @@ impl Default for MoonlightConfig {
+         Self {
+             default_http_port: default_moonlight_http_port(),
+             pair_device_name: default_pair_device_name(),
++            packet_size: default_moonlight_packet_size(),
+         }
+     }
+ }
+ 
++fn default_moonlight_packet_size() -> u32 {
++    crate::api::stream::VIDEO_PACKET_SIZE
++}
++
+ fn default_moonlight_http_port() -> u16 {
+     47989
+ }
+diff --git a/web/default_settings.ts b/web/default_settings.ts
+index 0c14361..46f59d8 100644
+--- a/web/default_settings.ts
++++ b/web/default_settings.ts
+@@ -36,7 +36,7 @@ const trueDefaultSettings: Settings =
+         "sendIntervalOverride": null
+     },
+     // possible values: "auto", "webrtc", "websocket"
+-    "dataTransport": "auto",
++    "dataTransport": "websocket",
+     "language": "en",
+     "enterFullscreenOnStreamStart": false,
+     "toggleFullscreenWithKeybind": false,
+diff --git a/web/stream/codec_fallback.test.ts b/web/stream/codec_fallback.test.ts
+new file mode 100644
+index 0000000..013ba6a
+--- /dev/null
++++ b/web/stream/codec_fallback.test.ts
+@@ -0,0 +1,65 @@
++// @ts-ignore - this project has no type declarations for "bun:test"; the tests
++// run with `bun test` and the import error is suppressed.
++import { expect, test } from "bun:test"
++import { H264_FALLBACK_WINDOW_MS, hintHasNonH264, shouldAbortStalledStream, shouldFallbackToH264 } from "./codec_fallback"
++
++function formats(overrides: Partial<Record<string, boolean>> = {}) {
++    return {
++        h264: true,
++        h264High8444: false,
++        h265: false,
++        h265Main10: false,
++        h265Rext8444: false,
++        h265Rext10444: false,
++        av1Main8: false,
++        av1Main10: false,
++        av1High8444: false,
++        av1High10444: false,
++        ...overrides,
++    }
++}
++
++test("H264-only hints never trigger the fallback", () => {
++    expect(hintHasNonH264(formats())).toBe(false)
++    expect(hintHasNonH264(formats({ h264High8444: true }))).toBe(false)
++    expect(shouldFallbackToH264(formats(), null, 1_000_000, false)).toBe(false)
++})
++
++test("AV1/HEVC hints trigger a retry when the connection never starts", () => {
++    expect(hintHasNonH264(formats({ av1Main8: true }))).toBe(true)
++    expect(shouldFallbackToH264(formats({ av1Main8: true }), null, 0, false)).toBe(true)
++    expect(shouldFallbackToH264(formats({ h265: true }), null, 0, false)).toBe(true)
++})
++
++test("a quick death after connecting triggers the retry", () => {
++    const hint = formats({ av1Main8: true })
++    const connectedAt = 10_000
++    expect(shouldFallbackToH264(hint, connectedAt, connectedAt + 1_000, false)).toBe(true)
++    expect(shouldFallbackToH264(hint, connectedAt, connectedAt + H264_FALLBACK_WINDOW_MS - 1, false)).toBe(true)
++})
++
++test("a long healthy session is not restarted", () => {
++    const hint = formats({ av1Main8: true })
++    const connectedAt = 10_000
++    expect(shouldFallbackToH264(hint, connectedAt, connectedAt + H264_FALLBACK_WINDOW_MS, false)).toBe(false)
++    expect(shouldFallbackToH264(hint, connectedAt, connectedAt + 60_000, false)).toBe(false)
++})
++
++test("the fallback is only attempted once", () => {
++    const hint = formats({ av1Main8: true })
++    expect(shouldFallbackToH264(hint, null, 0, true)).toBe(false)
++})
++
++test("a stalled stream is only aborted when a fallback is possible", () => {
++    const av1 = formats({ av1Main8: true })
++    const h264Only = formats()
++    expect(shouldAbortStalledStream(av1, 9_999, false)).toBe(false)
++    expect(shouldAbortStalledStream(av1, 10_000, false)).toBe(true)
++    expect(shouldAbortStalledStream(av1, 60_000, false)).toBe(true)
++    // Already retried -> never abort again.
++    expect(shouldAbortStalledStream(av1, 60_000, true)).toBe(false)
++    // H264-only hint -> a retry could not change anything.
++    expect(shouldAbortStalledStream(h264Only, 60_000, false)).toBe(false)
++    // No video received at all -> connection handling owns that case.
++    expect(shouldAbortStalledStream(av1, null, false)).toBe(false)
++})
+diff --git a/web/stream/codec_fallback.ts b/web/stream/codec_fallback.ts
+new file mode 100644
+index 0000000..72faa78
+--- /dev/null
++++ b/web/stream/codec_fallback.ts
+@@ -0,0 +1,65 @@
++// Pure decision logic for the "stream died right after starting" codec
++// fallback. Kept free of DOM/uniffi so it can be unit tested.
++//
++// A host that cannot handle the preferred codec (e.g. AV1 preference against
++// an H264-only host) may fail to start or die right after the first frame.
++// When that happens quickly after connecting (or the connection never
++// establishes), the client retries exactly once with a plain H264-only hint.
++import type { VideoFormats } from "../uniffi/moonlight_common_bindings"
++
++/// A session that lived at least this long is considered a normal session end
++/// and must not be silently restarted.
++export const H264_FALLBACK_WINDOW_MS = 15000
++
++/// A stalled video flow is treated as "the negotiated codec does not actually
++/// work on this host" after this long without any video payload. The first
++/// fallback retry is much faster (session dies immediately); this one covers
++/// the "one frame then frozen forever" case, where the session stays open.
++export const VIDEO_STALL_FALLBACK_MS = 10000
++
++export function hintHasNonH264(hint: VideoFormats): boolean {
++    return hint.h265 || hint.h265Main10 || hint.h265Rext8444 || hint.h265Rext10444
++        || hint.av1Main8 || hint.av1Main10 || hint.av1High8444 || hint.av1High10444
++}
++
++export function shouldFallbackToH264(
++    hint: VideoFormats,
++    lastConnectAt: number | null,
++    now: number,
++    alreadyTried: boolean,
++): boolean {
++    if (alreadyTried) {
++        return false
++    }
++    if (!hintHasNonH264(hint)) {
++        return false
++    }
++    // Never connected -> allow one retry. Connected but ended quickly ->
++    // allow one retry. Connected and lived past the window -> normal end.
++    if (lastConnectAt != null && now - lastConnectAt >= H264_FALLBACK_WINDOW_MS) {
++        return false
++    }
++    return true
++}
++
++/// Should a connected-but-stalled stream be aborted so the H264 fallback can
++/// run? Only when a fallback is still possible and the video flow stopped after
++/// having started (msSinceLastVideo == null means no video arrived yet, which
++/// the normal connection handling covers).
++export function shouldAbortStalledStream(
++    hint: VideoFormats,
++    msSinceLastVideo: number | null,
++    alreadyTried: boolean,
++    threshold = VIDEO_STALL_FALLBACK_MS,
++): boolean {
++    if (alreadyTried) {
++        return false
++    }
++    if (!hintHasNonH264(hint)) {
++        return false
++    }
++    if (msSinceLastVideo == null) {
++        return false
++    }
++    return msSinceLastVideo >= threshold
++}
+diff --git a/web/stream/index.ts b/web/stream/index.ts
+index 5162a60..3b66340 100644
+--- a/web/stream/index.ts
++++ b/web/stream/index.ts
+@@ -2,7 +2,7 @@ import { Api, apiWebRTCConfiguration, apiWebRTCOffer } from "../api"
+ import { Component } from "../component/index"
+ import { Settings, TransportType } from "../component/settings_menu"
+ import { ControlPacket, ControlPacket_Tags, VideoFormats } from "../uniffi/moonlight_common_bindings"
+-import { wait } from "../util"
++import { wait, globalObject } from "../util"
+ import { AudioPlayer, AudioPlayerSetup } from "./audio/index"
+ import { buildAudioPipeline } from "./audio/pipeline"
+ import { defaultStreamInputConfig, StreamInput } from "./input"
+@@ -13,6 +13,7 @@ import { Transport, TransportAudioType, TransportConnectData, TransportOptions,
+ import { WebSocketTransport } from "./transport/web_socket"
+ import { WebRTCTransport } from "./transport/webrtc"
+ import { allVideoCodecs, andVideoCodecs, emptyVideoCodecs, hasAnyCodec } from "./video"
++import { shouldFallbackToH264, shouldAbortStalledStream, hintHasNonH264 } from "./codec_fallback"
+ import { VideoRenderer, VideoRendererSetup } from "./video/index"
+ import { buildVideoPipeline, queryVideoPipelineInfo, VideoPipelineOptions } from "./video/pipeline"
+ import { StreamPermissions } from "../api_bindings"
+@@ -69,6 +70,8 @@ function getVideoCodecHint(settings: Settings): VideoFormats {
+         videoCodecHint.h265Rext8444 = true
+         videoCodecHint.h265Rext10444 = true
+     } else if (settings.videoCodec == "av1") {
++        // Keep H264 available for hosts without AV1 encoding support.
++        videoCodecHint.h264 = true
+         videoCodecHint.av1Main8 = true
+         videoCodecHint.av1Main10 = true
+         videoCodecHint.av1High8444 = true
+@@ -77,21 +80,18 @@ function getVideoCodecHint(settings: Settings): VideoFormats {
+         videoCodecHint = allVideoCodecs()
+     }
+ 
+-    if (isFirefox()) {
+-        videoCodecHint.av1Main8 = false
+-        videoCodecHint.av1Main10 = false
+-    }
+-
+     return videoCodecHint
+ }
+ 
+-function isFirefox(): boolean {
+-    return navigator.userAgent.includes("Firefox/")
+-}
+-
+ const WEBRTC_CONNECT_TIMEOUT_MS = 15000
+ const FALLBACK_RECONNECT_DELAY_MS = 500
+ 
++function plainH264Hint(): VideoFormats {
++    const hint = emptyVideoCodecs()
++    hint.h264 = true
++    return hint
++}
++
+ export class Stream implements Component {
+     private logger: Logger = new Logger()
+ 
+@@ -141,6 +141,9 @@ export class Stream implements Component {
+             controllerConfig: this.settings.controllerConfig
+         })
+         this.input = new StreamInput(streamInputConfig)
++        // JIS IME-mode diagnostics (only fired for likely Japanese mode keys)
++        // should be visible in the normal stream log.
++        this.input.setLogger(this.logger)
+ 
+         // Stream Stats
+         this.stats = new StreamStats(this.logger)
+@@ -161,25 +164,105 @@ export class Stream implements Component {
+     async startConnection() {
+         this.debugLog(`Permissions: ${JSON.stringify(this.permissions)}`)
+ 
+-        const desiredTransport = this.transportOverride ?? this.settings.dataTransport
+-        this.debugLog(`Using transport: ${desiredTransport}`)
+-
+-        if (desiredTransport == "auto") {
+-            let shutdownReason = await this.tryWebRTCTransport()
++        if (!this.permissions.allow_transport_websockets) {
++            this.debugLog("This deployment requires WebSocket transport, but your role does not allow it.", { type: "fatal" })
++            return
++        }
+ 
+-            if (shutdownReason == "failednoconnect") {
+-                this.debugLog("Failed to establish WebRTC connection. Falling back to Web Socket transport.", { type: "ifErrorDescription" })
+-                await this.tryWebSocketTransport()
+-            }
+-        } else if (desiredTransport == "webrtc") {
+-            await this.tryWebRTCTransport()
+-        } else if (desiredTransport == "websocket") {
++        // This deployment is reached exclusively through Cloudflare Tunnel.
++        // Saved settings and URL overrides must not trigger a doomed ICE attempt
++        // (and a host streaming session) before falling back after 15 seconds.
++        const requestedTransport = this.transportOverride ?? this.settings.dataTransport
++        if (requestedTransport != "websocket") {
++            this.debugLog(`Ignoring transport preference ${requestedTransport}: this deployment uses WebSocket only`)
++        }
++        this.debugLog("Using transport: websocket")
++        this.stopVideoStallWatchdog()
++        await this.tryWebSocketTransport()
++
++        // A host that cannot handle the preferred codec (e.g. AV1 preference
++        // against an H264-only host) may fail to start or die right after the
++        // first frame. Retry exactly once with a plain H264-only hint, which is
++        // the codec every Moonlight host supports.
++        if (this.shouldRetryWithH264()) {
++            this.codecFallbackTried = true
++            this.forcedCodecHint = plainH264Hint()
++            this.debugLog("Stream did not stay connected. Retrying once with H264 (the preferred codec may not be supported by this host)", { type: "informError" })
+             await this.tryWebSocketTransport()
+         }
+ 
++        this.stopVideoStallWatchdog()
+         this.debugLog("Tried all configured transport options but no connection was possible", { type: "fatal" })
+     }
+ 
++    private codecFallbackTried = false
++    // Set from createTransportOptions() for the H264 fallback attempt.
++    private forcedCodecHint: VideoFormats | null = null
++    // Set by the transports when a session actually connects.
++    private lastConnectAt: number | null = null
++
++    private effectiveCodecHint(): VideoFormats {
++        return this.forcedCodecHint ?? getVideoCodecHint(this.settings)
++    }
++
++    private shouldRetryWithH264(): boolean {
++        if (this.forcedCodecHint != null || this.codecFallbackTried) {
++            return false
++        }
++        if (this.forceH264Retry) {
++            // The stream stalled after starting (e.g. one frame, then nothing).
++            // The negotiated codec is the prime suspect, so retry with H264
++            // regardless of how long the session had been connected.
++            return true
++        }
++        return shouldFallbackToH264(
++            getVideoCodecHint(this.settings),
++            this.lastConnectAt,
++            performance.now(),
++            this.codecFallbackTried,
++        )
++    }
++
++    // Set by the stall watchdog so the "one frame then frozen" case always gets
++    // one H264 retry, even when the stall happens after the quick-death window.
++    private forceH264Retry = false
++    private videoStallTimer: number | null = null
++
++    private stopVideoStallWatchdog() {
++        if (this.videoStallTimer != null) {
++            globalObject().clearInterval(this.videoStallTimer)
++            this.videoStallTimer = null
++        }
++    }
++
++    private startVideoStallWatchdog(transport: Transport) {
++        this.stopVideoStallWatchdog()
++
++        // Only useful when a fallback retry is still possible.
++        if (this.codecFallbackTried || !hintHasNonH264(getVideoCodecHint(this.settings))) {
++            return
++        }
++        if (!transport.msSinceLastVideo) {
++            return
++        }
++
++        this.videoStallTimer = globalObject().setInterval(() => {
++            if (this.transport != transport || !transport.msSinceLastVideo) {
++                return
++            }
++
++            const since = transport.msSinceLastVideo()
++            if (!shouldAbortStalledStream(getVideoCodecHint(this.settings), since, this.codecFallbackTried)) {
++                return
++            }
++
++            this.stopVideoStallWatchdog()
++            this.forceH264Retry = true
++            this.debugLog(`Video stalled for ${Math.round(since ?? 0)}ms. Reconnecting once with H264 (the preferred codec may not work on this host)`, { type: "informError" })
++            void transport.close()
++        }, 2000)
++    }
++
+     private transport: Transport | null = null
+ 
+     private setTransport(transport: Transport) {
+@@ -196,7 +279,7 @@ export class Stream implements Component {
+     }
+ 
+     private async createTransportOptions(): Promise<TransportOptions | null> {
+-        const codecHint = getVideoCodecHint(this.settings)
++        const codecHint = this.effectiveCodecHint()
+ 
+         const dataCodecs = await this.queryVideoCodecs("data")
+ 
+@@ -293,6 +376,8 @@ export class Stream implements Component {
+         }
+ 
+         // -- Connection successful
++        this.lastConnectAt = performance.now()
++        this.startVideoStallWatchdog(transport)
+         await this.onConnect(connectData)
+ 
+         return await onClose
+@@ -340,6 +425,8 @@ export class Stream implements Component {
+         }
+ 
+         // -- Connection successful
++        this.lastConnectAt = performance.now()
++        this.startVideoStallWatchdog(transport)
+         this.onConnect(connectData)
+ 
+         return await onClose
+@@ -405,7 +492,7 @@ export class Stream implements Component {
+     }
+ 
+     private async queryVideoCodecs(type: "videotrack" | "data"): Promise<VideoFormats> {
+-        const codecHint = getVideoCodecHint(this.settings)
++        const codecHint = this.effectiveCodecHint()
+ 
+         const videoSettings: VideoPipelineOptions = {
+             supportedVideoCodecs: codecHint,
+diff --git a/web/stream/stats.ts b/web/stream/stats.ts
+index 5c023f4..770d5f7 100644
+--- a/web/stream/stats.ts
++++ b/web/stream/stats.ts
+@@ -2,65 +2,11 @@ import { globalObject } from "../util"
+ import { Logger } from "./log"
+ import { Pipe } from "./pipeline/index"
+ import { Transport } from "./transport/index"
++import { streamStatsToText } from "./stats_text"
++import type { StreamStatsData } from "./stats_text"
+ 
+-export type StatValue = string | number
+-
+-export type StreamStatsData = {
+-    videoPipeline: string | null
+-    audioPipeline: string | null
+-    transport: Record<string, StatValue>
+-    video: Record<string, StatValue>
+-    audio: Record<string, StatValue>
+-}
+-
+-function num(value: number | null | undefined, suffix?: string): string | null {
+-    if (value == null) {
+-        return null
+-    } else {
+-        return `${value.toFixed(2)}${suffix ?? ""}`
+-    }
+-}
+-
+-export function streamStatsToText(statsData: StreamStatsData): string {
+-    let text = `stats:
+-video pipeline: ${statsData.videoPipeline}
+-audio pipeline: ${statsData.audioPipeline}
+-`
+-    for (const key in statsData.transport) {
+-        const value = statsData.transport[key]
+-        let valuePretty = value
+-
+-        if (typeof value == "number" && key.endsWith("Ms")) {
+-            valuePretty = `${num(value, "ms")}`
+-        }
+-
+-        text += `${key}: ${valuePretty}\n`
+-    }
+-
+-    for (const key in statsData.video) {
+-        const value = statsData.video[key]
+-        let valuePretty = value
+-
+-        if (typeof value == "number" && key.endsWith("Ms")) {
+-            valuePretty = `${num(value, "ms")}`
+-        }
+-
+-        text += `${key}: ${valuePretty}\n`
+-    }
+-
+-    for (const key in statsData.audio) {
+-        const value = statsData.audio[key]
+-        let valuePretty = value
+-
+-        if (typeof value == "number" && key.endsWith("Ms")) {
+-            valuePretty = `${num(value, "ms")}`
+-        }
+-
+-        text += `${key}: ${valuePretty}\n`
+-    }
+-
+-    return text
+-}
++export { streamStatsToText }
++export type { StatValue, StreamStatsData } from "./stats_text"
+ 
+ export class StreamStats {
+ 
+diff --git a/web/stream/stats_text.test.ts b/web/stream/stats_text.test.ts
+new file mode 100644
+index 0000000..33e25ee
+--- /dev/null
++++ b/web/stream/stats_text.test.ts
+@@ -0,0 +1,42 @@
++// @ts-ignore - this project has no type declarations for "bun:test"; the tests
++// run with `bun test` and the import error is suppressed.
++import { expect, test } from "bun:test"
++import { StreamStatsData, streamStatsToText } from "./stats_text"
++
++function data(transport: Record<string, string | number>): StreamStatsData {
++    return { videoPipeline: "ws", audioPipeline: "ws", transport, video: {}, audio: {} }
++}
++
++test("the overlay shows only codec, fps, resolution and the two latencies", () => {
++    const text = streamStatsToText(data({
++        codec: "av1",
++        resolution: "Width: 1920, Height: 1080, Fps: 60",
++        hostToRelayRttMs: 12.4,
++        relayToClientRttMs: 35.6,
++        decoderQueueSize: 3,
++        decoderDecodedOutputs: 12345,
++    }))
++
++    expect(text).toContain("codec: av1")
++    expect(text).toContain("fps: 60")
++    expect(text).toContain("resolution: 1920x1080")
++    expect(text).toContain("host → relay: 12ms")
++    expect(text).toContain("relay → client: 36ms")
++    // The noisy internal counters must not leak into the compact overlay.
++    expect(text).not.toContain("decoder")
++})
++
++test("missing values render as placeholders", () => {
++    const text = streamStatsToText(data({}))
++    expect(text).toContain("codec: ?")
++    expect(text).toContain("fps: ?")
++    expect(text).toContain("resolution: ?")
++    expect(text).toContain("host → relay: ?")
++    expect(text).toContain("relay → client: ?")
++})
++
++test("a malformed resolution string degrades to placeholders", () => {
++    const text = streamStatsToText(data({ resolution: "garbage" }))
++    expect(text).toContain("fps: ?")
++    expect(text).toContain("resolution: ?")
++})
+diff --git a/web/stream/stats_text.ts b/web/stream/stats_text.ts
+new file mode 100644
+index 0000000..e37a7ea
+--- /dev/null
++++ b/web/stream/stats_text.ts
+@@ -0,0 +1,40 @@
++// Formatting for the in-stream stats overlay. Deliberately free of transport,
++// DOM and logger imports so it can be unit tested.
++export type StatValue = string | number
++
++export type StreamStatsData = {
++    videoPipeline: string | null
++    audioPipeline: string | null
++    transport: Record<string, StatValue>
++    video: Record<string, StatValue>
++    audio: Record<string, StatValue>
++}
++
++function prettyMs(value: StatValue | undefined): string {
++    return typeof value == "number" ? `${Math.round(value)}ms` : "?"
++}
++
++/// Compact overlay: codec, fps, resolution and the two latency segments.
++/// The detailed decoder/transport counters stay available in the stats data
++/// (and in the logs) but are intentionally not rendered here.
++export function streamStatsToText(statsData: StreamStatsData): string {
++    const transport = statsData.transport
++
++    let fps = "?"
++    let resolution = "?"
++    if (typeof transport.resolution == "string") {
++        const match = /Width:\s*(\d+),\s*Height:\s*(\d+),\s*Fps:\s*([\d.]+)/.exec(transport.resolution)
++        if (match) {
++            resolution = `${match[1]}x${match[2]}`
++            fps = match[3]
++        }
++    }
++
++    return `stats:
++codec: ${transport.codec ?? "?"}
++fps: ${fps}
++resolution: ${resolution}
++host → relay: ${prettyMs(transport.hostToRelayRttMs)}
++relay → client: ${prettyMs(transport.relayToClientRttMs)}
++`
++}
+diff --git a/web/stream/transport/index.ts b/web/stream/transport/index.ts
+index 182a4d3..461eca5 100644
+--- a/web/stream/transport/index.ts
++++ b/web/stream/transport/index.ts
+@@ -57,6 +57,11 @@ export interface Transport {
+     setAudioPipeline(type: "data", pipeline: (DataPipe & AudioPlayer)): Promise<void>
+ 
+     getStats(): Promise<Record<string, StatValue>>
++
++    /// Milliseconds since the last video payload was received, or null when no
++    /// video payload has been received yet. Optional: only implemented by
++    /// transports that can detect a stalled video flow (web socket).
++    msSinceLastVideo?(): number | null
+ }
+ 
+ export function generateControlPacketConfig(): ControlPacketConfig {
+diff --git a/web/stream/transport/web_socket.ts b/web/stream/transport/web_socket.ts
+index 7802a3b..5134c6a 100644
+--- a/web/stream/transport/web_socket.ts
++++ b/web/stream/transport/web_socket.ts
+@@ -118,6 +118,14 @@ export class WebSocketTransport implements Transport {
+             if (channel == WebSocketChannel.CONTROL) {
+                 this.controlStream.onRawPacket(view.subarray(1))
+             } else if (channel == WebSocketChannel.VIDEO) {
++                const now = performance.now()
++                if (this.lastVideoReceivedAt != null) {
++                    this.maxVideoReceiveGapMs = Math.max(this.maxVideoReceiveGapMs, now - this.lastVideoReceivedAt)
++                }
++                this.lastVideoReceivedAt = now
++                this.videoMessagesReceived += 1
++                this.videoBytesReceived += view.byteLength - 1
++                this.maxVideoMessageBytes = Math.max(this.maxVideoMessageBytes, view.byteLength - 1)
+                 this.videoPipeline?.submitPacket(view.subarray(1))
+                 if (this.videoPipeline && "pollRequestIdr" in this.videoPipeline && typeof this.videoPipeline.pollRequestIdr == "function" && this.videoPipeline.pollRequestIdr()) {
+                     this.logger?.debug("requesting idr")
+@@ -125,6 +133,7 @@ export class WebSocketTransport implements Transport {
+                     this.controlStream.sendRaw(new ControlPacket.RequestIdr())
+                 }
+             } else if (channel == WebSocketChannel.AUDIO) {
++                this.lastAudioReceivedAt = performance.now()
+                 this.audioPipeline?.submitPacket(view.subarray(1))
+             }
+         }
+@@ -188,8 +197,29 @@ export class WebSocketTransport implements Transport {
+     }
+ 
+     private relayStats: { rttMs: number, rttVarianceMs: number } | null = null
++    private lastVideoReceivedAt: number | null = null
++    private lastAudioReceivedAt: number | null = null
++
++    /// Milliseconds since the last video payload was received, or null when no
++    /// video payload has arrived yet.
++    msSinceLastVideo(): number | null {
++        return this.lastVideoReceivedAt == null ? null : performance.now() - this.lastVideoReceivedAt
++    }
++    private videoMessagesReceived = 0
++    private videoBytesReceived = 0
++    private maxVideoMessageBytes = 0
++    private maxVideoReceiveGapMs = 0
++    private lastRelayToClientRttMs = -1
+     async getStats(): Promise<Record<string, StatValue>> {
+         const out: Record<string, StatValue> = {}
++        const now = performance.now()
++        out.wsVideoMessagesReceived = this.videoMessagesReceived
++        out.wsVideoBytesReceived = this.videoBytesReceived
++        out.wsLargestVideoMessageBytes = this.maxVideoMessageBytes
++        out.wsMaxVideoReceiveGapMs = Math.round(this.maxVideoReceiveGapMs)
++        out.wsSinceLastVideoMs = this.lastVideoReceivedAt == null ? -1 : Math.round(now - this.lastVideoReceivedAt)
++        out.wsSinceLastAudioMs = this.lastAudioReceivedAt == null ? -1 : Math.round(now - this.lastAudioReceivedAt)
++        out.wsOutgoingBufferedBytes = this.ws.bufferedAmount
+ 
+         if (this.connectData) {
+             out.codec = this.connectData.videoSetup.codec
+@@ -200,7 +230,11 @@ export class WebSocketTransport implements Transport {
+             out.hostToRelayRttMs = this.relayStats.rttMs
+             out.hostToRelayRttVarianceMs = this.relayStats.rttVarianceMs
+         }
+-        out.relayToClientRttMs = await this.doPing()
++        // A queued/lost Pong must not freeze all the video diagnostics.
++        if (this.connectData && !this.onPongPromise) {
++            void this.doPing().then(rtt => { this.lastRelayToClientRttMs = rtt })
++        }
++        out.relayToClientRttMs = this.lastRelayToClientRttMs
+ 
+         return out
+     }
+@@ -208,9 +242,10 @@ export class WebSocketTransport implements Transport {
+     // Do ping pong to get rtt
+     private onPongPromise: Promise<number> | null = null
+     private pongReceiveResolve: (() => void) | null = null
++    private pendingPingId: number | null = null
+ 
+-    private onPongReceive(_id: number) {
+-        if (this.pongReceiveResolve) {
++    private onPongReceive(id: number) {
++        if (id == this.pendingPingId && this.pongReceiveResolve) {
+             this.pongReceiveResolve()
+         }
+     }
+@@ -224,12 +259,22 @@ export class WebSocketTransport implements Transport {
+         }
+ 
+         // Setup pong receive
++        const pingId = Math.floor(Math.random() * 0x7fffffff)
++        this.pendingPingId = pingId
+         this.onPongPromise = new Promise<number>(resolve => {
+             const start = performance.now()
++            const timeout = globalObject().setTimeout(() => {
++                this.pongReceiveResolve = null
++                this.onPongPromise = null
++                this.pendingPingId = null
++                resolve(-1)
++            }, 2000)
+ 
+             this.pongReceiveResolve = () => {
++                globalObject().clearTimeout(timeout)
+                 this.pongReceiveResolve = null
+                 this.onPongPromise = null
++                this.pendingPingId = null
+ 
+                 const diff = performance.now() - start
+                 resolve(diff)
+@@ -239,7 +284,7 @@ export class WebSocketTransport implements Transport {
+         // Send Ping
+         this.sendMessage({
+             Stats: {
+-                Ping: Math.floor(Math.random() * 1000)
++                Ping: pingId
+             }
+         })
+ 
+@@ -281,7 +326,7 @@ class WebSocketControlStream implements IControlStream {
+         }
+ 
+         if (this.batchSendTimeout == null) {
+-            globalObject().setTimeout(this.boundSendBatchedInputs, 1)
++            this.batchSendTimeout = globalObject().setTimeout(this.boundSendBatchedInputs, 1)
+         }
+     }
+ 
+diff --git a/web/stream/video/annex_b_translator.ts b/web/stream/video/annex_b_translator.ts
+index 0786867..18d7cab 100644
+--- a/web/stream/video/annex_b_translator.ts
++++ b/web/stream/video/annex_b_translator.ts
+@@ -138,6 +138,12 @@ export abstract class CodecStreamTranslator {
+     protected abstract onChunkUnit(slice: Uint8Array): { include: boolean };
+     protected abstract endChunk(): { reconfigure: boolean };
+ 
++    /// True once the translator has seen the parameter sets (H264 SPS/PPS or
++    /// H265 VPS/SPS/PPS) needed to configure the decoder. While false, the
++    /// translator silently drops delta units, so the pipe is still waiting for
++    /// a key frame.
++    abstract hasCodecDescription(): boolean;
++
+     protected checkFrameBufferSize(currentSize: number, requiredExtra: number) {
+         if (currentSize + requiredExtra > this.currentFrame.length) {
+             const newFrame = new Uint8Array((currentSize + requiredExtra) * 2);
+@@ -229,6 +235,9 @@ export class H264StreamVideoTranslator extends CodecStreamTranslator {
+             shouldProcess: unit.type == "key" || this.hasDescription
+         }
+     }
++    hasCodecDescription(): boolean {
++        return this.hasDescription
++    }
+     protected onChunkUnit(slice: Uint8Array): { include: boolean } {
+         const nalType = h264NalType(slice[0])
+ 
+@@ -379,6 +388,10 @@ export class H265StreamVideoTranslator extends CodecStreamTranslator {
+         }
+     }
+ 
++    hasCodecDescription(): boolean {
++        return this.hasDescription
++    }
++
+     protected onChunkUnit(slice: Uint8Array): { include: boolean } {
+         const nalType = h265NalType(slice[0])
+ 
+diff --git a/web/stream/video/video_decoder_health.test.ts b/web/stream/video/video_decoder_health.test.ts
+new file mode 100644
+index 0000000..29ba288
+--- /dev/null
++++ b/web/stream/video/video_decoder_health.test.ts
+@@ -0,0 +1,266 @@
++// @ts-ignore - this project has no type declarations for "bun:test"; the tests
++// are executed with `bun test` (see the report for the exact command) and are
++// still type-checked by `tsc` because the import error is suppressed.
++import { expect, test } from "bun:test"
++import { DecoderRecoveryThresholds, VideoDecoderHealth } from "./video_decoder_health"
++
++class FakeClock {
++    now = 0
++    read = () => this.now
++    advance(ms: number) { this.now += ms }
++}
++
++function createHealth(thresholds?: Partial<DecoderRecoveryThresholds>) {
++    const clock = new FakeClock()
++    const health = new VideoDecoderHealth({ clock: clock.read, thresholds })
++    return { clock, health }
++}
++
++// -- fps validation -----------------------------------------------------------
++
++test("fps validation falls back for 0 / negative / non-finite / out-of-range", () => {
++    const { health } = createHealth()
++
++    expect(health.setFps(0)).toEqual({ raw: 0, fps: 60, valid: false })
++    expect(health.setFps(-30).valid).toBe(false)
++    expect(health.setFps(NaN).valid).toBe(false)
++    expect(health.setFps(Infinity).valid).toBe(false)
++    expect(health.setFps(5000).valid).toBe(false)
++    expect(health.fps).toBe(60)
++
++    expect(health.setFps(120)).toEqual({ raw: 120, fps: 120, valid: true })
++    expect(health.fps).toBe(120)
++    expect(health.fpsValid).toBe(true)
++})
++
++test("fps fallback keeps the queue estimate finite", () => {
++    const { health } = createHealth()
++    health.setFps(0)
++
++    // 13 queued chunks at the fallback 60fps => ~216ms, i.e. shallow enough to
++    // start the sustained-overload timer but never Infinity/NaN.
++    health.pollBacklog(13, 0)
++    const result = health.pollBacklog(13, 300)
++    expect(Number.isFinite(result.reason === null ? 0 : 1)).toBe(true)
++    expect(result.requestIdr).toBe(true)
++})
++
++// -- preserved sustained backlog patch ---------------------------------------
++
++test("a transient burst never triggers the destructive recovery", () => {
++    const { health } = createHealth()
++    health.setFps(60)
++
++    expect(health.pollBacklog(13, 0).requestIdr).toBe(false)
++    // Only 100ms of backlog -> below the 250ms sustain window.
++    expect(health.pollBacklog(13, 100).requestIdr).toBe(false)
++    // Backlog clears.
++    expect(health.pollBacklog(0, 150).requestIdr).toBe(false)
++    // Starts over: 100ms is still not enough.
++    expect(health.pollBacklog(13, 300).requestIdr).toBe(false)
++})
++
++test("a sustained >200ms, >2 chunk backlog requests an IDR + reset after 250ms", () => {
++    const { clock, health } = createHealth()
++    health.setFps(60)
++
++    expect(health.pollBacklog(13, clock.now).requestIdr).toBe(false)
++    clock.advance(200)
++    expect(health.pollBacklog(13, clock.now).requestIdr).toBe(false)
++
++    clock.advance(60) // 260ms total
++    const result = health.pollBacklog(13, clock.now)
++    expect(result.requestIdr).toBe(true)
++    expect(result.reset).toBe(true)
++    expect(result.reason).toContain("sustained decoder backlog")
++})
++
++test("the destructive reset is rate limited to one per cooldown", () => {
++    const { clock, health } = createHealth()
++    health.setFps(60)
++
++    health.pollBacklog(13, 0)
++    clock.advance(260)
++    expect(health.pollBacklog(13, clock.now).requestIdr).toBe(true)
++
++    // Simulate the pipe generating the request + receiving no key frame yet.
++    health.requestIdr(clock.now)
++
++    clock.advance(2100)
++    expect(health.pollBacklog(13, clock.now).requestIdr).toBe(false)
++})
++
++test("a shallow queue (<=2 chunks) is never treated as backlog", () => {
++    const { clock, health } = createHealth()
++    health.setFps(60)
++
++    expect(health.pollBacklog(2, clock.now).requestIdr).toBe(false)
++    clock.advance(5000)
++    expect(health.pollBacklog(2, clock.now).requestIdr).toBe(false)
++})
++
++// -- key frame wait / IDR retry ----------------------------------------------
++
++test("waiting for a key frame re-requests an IDR throttled to ~1s, without reset state", () => {
++    const { clock, health } = createHealth()
++    health.setFps(60)
++    health.markWaitingForKeyFrame(clock.now)
++
++    clock.advance(999)
++    expect(health.pollKeyFrameRetry(clock.now)).toBe(false)
++
++    clock.advance(1)
++    expect(health.pollKeyFrameRetry(clock.now)).toBe(true)
++    health.requestIdr(clock.now)
++
++    // Outstanding request throttles the next retry.
++    clock.advance(500)
++    expect(health.pollKeyFrameRetry(clock.now)).toBe(false)
++
++    clock.advance(500)
++    expect(health.pollKeyFrameRetry(clock.now)).toBe(true)
++    expect(health.keyFrameIdrRetryCount).toBeGreaterThanOrEqual(2)
++})
++
++test("a delta submission must not clear the outstanding IDR / timestamp", () => {
++    const { health } = createHealth()
++    health.setFps(60)
++    health.markWaitingForKeyFrame(0)
++    health.requestIdr(500)
++
++    expect(health.idrOutstanding).toBe(true)
++    expect(health.lastIdrRequestedAt).toBe(500)
++
++    // This used to happen on every delta and silently cancelled the retry.
++    health.noteSubmittedUnit("delta", 1000, 12345, 600)
++    expect(health.idrOutstanding).toBe(true)
++    expect(health.lastIdrRequestedAt).toBe(500)
++
++    // Submitting a key unit is also not enough by itself; the pipe calls
++    // noteKeyFrameReceived once the key frame is actually handed over.
++    health.noteSubmittedUnit("key", 2000, 20000, 700)
++    expect(health.idrOutstanding).toBe(true)
++
++    health.noteKeyFrameReceived()
++    expect(health.idrOutstanding).toBe(false)
++    expect(health.waitingForKeyFrame).toBe(false)
++})
++
++// -- stall detection / static desktop -----------------------------------------
++
++test("an idle static desktop (empty queue) never warns about a stall", () => {
++    const { health } = createHealth()
++    health.setFps(60)
++    health.noteSubmittedUnit("key", 500, 0, 0)
++    health.noteDecodedOutput(10)
++
++    expect(health.checkStall(0, 10 + 60000)).toBeNull()
++})
++
++test("a non-empty queue with no output warns, throttled", () => {
++    const { health } = createHealth()
++    health.setFps(60)
++    health.noteSubmittedUnit("delta", 500, 0, 100)
++    health.noteDecodedOutput(200)
++
++    expect(health.checkStall(1, 200 + 2999)).toBeNull()
++    const warning = health.checkStall(1, 200 + 3000)
++    expect(warning).not.toBeNull()
++    expect(warning).toContain("no output")
++
++    expect(health.checkStall(1, 200 + 3100)).toBeNull()
++})
++
++// -- aggregated logging -------------------------------------------------------
++
++test("units dropped after an error are counted and aggregated, not logged per frame", () => {
++    const { health } = createHealth()
++    health.setFps(60)
++    expect(health.drainLogs(0, 0)).toEqual([]) // baseline
++
++    for (let i = 0; i < 5; i++) {
++        health.noteDroppedAfterError()
++    }
++
++    const out: Record<string, string | number> = {}
++    health.reportStats(out, { queueSize: 0, errored: true, codec: null, waitingForKeyFrame: false }, 100)
++    expect(out.decoderDroppedAfterError).toBe(5)
++
++    const logs = health.drainLogs(0, 2000)
++    expect(logs.length).toBe(1)
++    expect(logs[0]).toContain("droppedAfterError=5")
++})
++
++test("per-frame drops are aggregated into a single periodic log line", () => {
++    const { health } = createHealth()
++    health.setFps(60)
++
++    expect(health.drainLogs(0, 0)).toEqual([]) // baseline
++
++    for (let i = 0; i < 100; i++) {
++        health.noteDroppedTranslatorChunk()
++    }
++    health.noteSubmittedUnit("delta", 100, 0, 100)
++
++    expect(health.drainLogs(0, 1000)).toEqual([])
++    const logs = health.drainLogs(0, 2000)
++    expect(logs.length).toBe(1)
++    expect(logs[0]).toContain("droppedTranslator=100")
++    expect(logs[0]).toContain("submitted=1")
++
++    // Nothing new -> nothing logged.
++    expect(health.drainLogs(0, 4000)).toEqual([])
++})
++
++test("routine frames alone never produce a decoder health log", () => {
++    const { health } = createHealth()
++    health.setFps(60)
++    health.noteKeyFrameReceived()
++
++    expect(health.drainLogs(0, 0)).toEqual([]) // baseline
++
++    // One second of normal 60fps playback: ~1 key + 59 deltas, all decoded.
++    for (let i = 0; i < 60; i++) {
++        health.noteSubmittedUnit(i == 0 ? "key" : "delta", 1000, i * 1000, 100 + i)
++        health.noteDecodedOutput(100 + i)
++    }
++
++    // Routine counters must stay out of the log entirely; they remain visible
++    // through reportStats instead.
++    expect(health.drainLogs(0, 2000)).toEqual([])
++    expect(health.drainLogs(0, 9000)).toEqual([])
++
++    const out: Record<string, string | number> = {}
++    health.reportStats(out, { queueSize: 0, errored: false, codec: null, waitingForKeyFrame: false }, 9200)
++    expect(out.decoderSubmittedUnits).toBe(60)
++    expect(out.decoderDecodedOutputs).toBe(60)
++})
++
++// -- stats --------------------------------------------------------------------
++test("reportStats exposes decode observability without claiming a cause", () => {
++    const { health } = createHealth()
++    health.setFps(59.94)
++    health.noteSubmittedUnit("key", 5000, 111, 0)
++    health.noteSubmittedUnit("delta", 100, 222, 10)
++    health.noteDecodedOutput(30)
++    health.noteDecoderError()
++    health.markWaitingForKeyFrame(30)
++
++    const out: Record<string, string | number> = {}
++    health.reportStats(out, { queueSize: 3, errored: true, codec: "avc3.42E01E", waitingForKeyFrame: true }, 1000)
++
++    expect(out.decoderSubmittedUnits).toBe(2)
++    expect(out.decoderSubmittedKeyUnits).toBe(1)
++    expect(out.decoderSubmittedDeltaUnits).toBe(1)
++    expect(out.decoderDecodedOutputs).toBe(1)
++    expect(out.decoderLargestCompressedFrameBytes).toBe(5000)
++    expect(out.decoderLargestCompressedFrameIsKey).toBe(1)
++    expect(out.decoderQueueSize).toBe(3)
++    expect(out.decoderSinceLastDecodeMs).toBe(970)
++    expect(out.decoderKeyFrameWaiting).toBe(1)
++    expect(out.decoderErrors).toBe(1)
++    expect(out.decoderErrored).toBe(1)
++    expect(out.decoderFpsValid).toBe(1)
++    // There must be no field asserting that hardware acceleration is active.
++    expect(Object.keys(out).some(key => /hardware|hwaccel/i.test(key))).toBe(false)
++})
+diff --git a/web/stream/video/video_decoder_health.ts b/web/stream/video/video_decoder_health.ts
+new file mode 100644
+index 0000000..cd3c1a7
+--- /dev/null
++++ b/web/stream/video/video_decoder_health.ts
+@@ -0,0 +1,423 @@
++import type { StatValue } from "../stats"
++
++/// Pure, clock-injected bookkeeping for the VideoDecoder pipe.
++///
++/// This class deliberately has no dependency on browser APIs (`VideoDecoder`,
++/// `performance`, ...) so that the timing / recovery logic can be tested
++/// without a DOM. The pipe owns all side effects (resetting / configuring the
++/// decoder, requesting an IDR over the transport) and this class only decides
++/// *when* those should happen and records what happened.
++///
++/// It exists because video-only scene-change freezes were impossible to
++/// diagnose from the client: there was no visibility into how many decode units
++/// were submitted, how many frames actually came out, how large the compressed
++/// frames were, whether the decoder queue was backing up, or whether we were
++/// stuck waiting for a key frame. Nothing here claims a root cause, it only
++/// measures.
++
++export type DecoderRecoveryThresholds = {
++    /// Estimated decoder backlog (ms) above which we consider the decoder to be
++    /// falling behind. This is the existing "sustained >200ms" patch and must
++    /// be preserved.
++    backlogDelayMs: number
++    /// Only consider the backlog a problem once the queue holds more than this
++    /// many chunks. A single queued frame is normal.
++    backlogMinQueue: number
++    /// The backlog has to persist this long before we act, so that a burst of
++    /// frames delivered by TCP right after a large scene change does not cause
++    /// a destructive reset.
++    backlogSustainMs: number
++    /// After acting on a backlog, do not act again for this long.
++    recoveryCooldownMs: number
++    /// While waiting for a key frame, re-request an IDR at most this often.
++    keyFrameIdrRetryMs: number
++    /// No decoded output for this long *while the queue is non-empty* is
++    /// reported as a stall. An idle static desktop has an empty queue and is
++    /// never reported.
++    stallWarnMs: number
++    /// Aggregated health log lines are emitted at most this often.
++    logIntervalMs: number
++    /// FPS used for the backlog estimate when the stream reports no usable fps.
++    fpsFallback: number
++    fpsMin: number
++    fpsMax: number
++}
++
++export const DEFAULT_DECODER_RECOVERY_THRESHOLDS: DecoderRecoveryThresholds = {
++    backlogDelayMs: 200,
++    backlogMinQueue: 2,
++    backlogSustainMs: 250,
++    recoveryCooldownMs: 2000,
++    keyFrameIdrRetryMs: 1000,
++    stallWarnMs: 3000,
++    logIntervalMs: 2000,
++    fpsFallback: 60,
++    fpsMin: 1,
++    fpsMax: 1000,
++}
++
++export type FpsValidation = {
++    raw: number
++    fps: number
++    valid: boolean
++}
++
++export type BacklogResult = {
++    requestIdr: boolean
++    reset: boolean
++    reason: string | null
++}
++
++export type DecoderHealthStatsInput = {
++    queueSize: number
++    errored: boolean
++    codec: string | null
++    /// Whether the decoder is currently waiting for an in-band codec
++    /// description (H264 SPS/PPS or H265 VPS/SPS/PPS). Only informational.
++    waitingForKeyFrame: boolean
++}
++
++export class VideoDecoderHealth {
++    private readonly thresholds: DecoderRecoveryThresholds
++    private readonly now: () => number
++
++    constructor(options?: { thresholds?: Partial<DecoderRecoveryThresholds>, clock?: () => number }) {
++        this.thresholds = { ...DEFAULT_DECODER_RECOVERY_THRESHOLDS, ...(options?.thresholds ?? {}) }
++        this.now = options?.clock ?? (() => Date.now())
++    }
++
++    // -- fps validation
++    private fpsValue: number = DEFAULT_DECODER_RECOVERY_THRESHOLDS.fpsFallback
++    private fpsRaw: number = 0
++    private fpsIsValid: boolean = false
++
++    setFps(raw: number): FpsValidation {
++        this.fpsRaw = raw
++        const valid = Number.isFinite(raw) && raw >= this.thresholds.fpsMin && raw <= this.thresholds.fpsMax
++        this.fpsIsValid = valid
++        this.fpsValue = valid ? raw : this.thresholds.fpsFallback
++
++        return { raw, fps: this.fpsValue, valid }
++    }
++    get fps(): number {
++        return this.fpsValue
++    }
++    get fpsValid(): boolean {
++        return this.fpsIsValid
++    }
++
++    // -- counters
++    private submittedUnits = 0
++    private submittedKeyUnits = 0
++    private submittedDeltaUnits = 0
++    private decodedOutputs = 0
++    private droppedDeltasBeforeKeyFrame = 0
++    private droppedTranslatorChunks = 0
++    private droppedAfterError = 0
++    private resyncCount = 0
++    private idrRequests = 0
++    private keyFrameWaitCount = 0
++    private keyFrameIdrRetries = 0
++    private decoderErrors = 0
++    private queueHighwater = 0
++
++    private largestCompressedFrameBytes = 0
++    private largestCompressedFrameIsKey = false
++    private largestCompressedFrameTimestampUs = -1
++
++    // -- timestamps (the injected clock's domain)
++    private lastSubmitAt = -1
++    private lastDecodeAt = -1
++    private lastIdrRequestAt = -1
++    private firstSubmitAt = -1
++    private lastStallLogAt = -Infinity
++    private lastSummaryAt = -1
++
++    private keyFrameWaitStartedAt = -1
++    private waitingForKeyFrameState = false
++    private idrOutstandingState = false
++
++    // -- backlog detection state (the preserved sustained >200ms patch)
++    private queueOverloadedAt: number | null = null
++    private lastQueueRecoveryAt = -Infinity
++
++    // -- aggregated summary accounting
++    private summarySubmitted = 0
++    private summarySubmittedKey = 0
++    private summarySubmittedDelta = 0
++    private summaryDecoded = 0
++    private summaryDroppedDelta = 0
++    private summaryDroppedTranslator = 0
++    private summaryDroppedAfterError = 0
++    private summaryErrors = 0
++    private summaryResync = 0
++
++    get waitingForKeyFrame(): boolean {
++        return this.waitingForKeyFrameState
++    }
++    get idrOutstanding(): boolean {
++        return this.idrOutstandingState
++    }
++    get keyFrameIdrRetryCount(): number {
++        return this.keyFrameIdrRetries
++    }
++    get lastIdrRequestedAt(): number {
++        return this.lastIdrRequestAt
++    }
++
++    markWaitingForKeyFrame(now = this.now()): void {
++        if (!this.waitingForKeyFrameState) {
++            this.waitingForKeyFrameState = true
++            this.keyFrameWaitCount++
++        }
++        if (this.keyFrameWaitStartedAt < 0) {
++            this.keyFrameWaitStartedAt = now
++        }
++    }
++
++    /// A key frame was successfully handed to the decoder (or the translator
++    /// now has a codec description). This is the only thing that satisfies an
++    /// outstanding RequestIDR.
++    noteKeyFrameReceived(): void {
++        this.waitingForKeyFrameState = false
++        this.keyFrameWaitStartedAt = -1
++        this.idrOutstandingState = false
++    }
++
++    /// Record that an IDR request was generated. The timestamp is set here every
++    /// time, and is intentionally never cleared by delta submissions.
++    requestIdr(now = this.now()): void {
++        this.idrRequests++
++        this.lastIdrRequestAt = now
++        this.idrOutstandingState = true
++    }
++
++    noteResync(_reason: string): void {
++        this.resyncCount++
++        this.summaryResync++
++    }
++
++    noteDecoderError(): void {
++        this.decoderErrors++
++        this.summaryErrors++
++    }
++
++    noteQueueSize(queueSize: number): void {
++        if (Number.isFinite(queueSize) && queueSize > this.queueHighwater) {
++            this.queueHighwater = queueSize
++        }
++    }
++
++    noteSubmittedUnit(type: "key" | "delta", compressedBytes: number, timestampMicroseconds: number, now = this.now()): void {
++        this.submittedUnits++
++        this.summarySubmitted++
++        if (type == "key") {
++            this.submittedKeyUnits++
++            this.summarySubmittedKey++
++        } else {
++            this.submittedDeltaUnits++
++            this.summarySubmittedDelta++
++        }
++
++        if (this.firstSubmitAt < 0) {
++            this.firstSubmitAt = now
++        }
++        this.lastSubmitAt = now
++
++        if (Number.isFinite(compressedBytes) && compressedBytes > this.largestCompressedFrameBytes) {
++            this.largestCompressedFrameBytes = compressedBytes
++            this.largestCompressedFrameIsKey = type == "key"
++            this.largestCompressedFrameTimestampUs = timestampMicroseconds
++        }
++    }
++
++    noteDroppedDelta(): void {
++        this.droppedDeltasBeforeKeyFrame++
++        this.summaryDroppedDelta++
++    }
++    noteDroppedTranslatorChunk(): void {
++        this.droppedTranslatorChunks++
++        this.summaryDroppedTranslator++
++    }
++    noteDroppedAfterError(): void {
++        this.droppedAfterError++
++        this.summaryDroppedAfterError++
++    }
++    noteDecodedOutput(now = this.now()): void {
++        this.decodedOutputs++
++        this.summaryDecoded++
++        this.lastDecodeAt = now
++    }
++
++    /// The preserved recovery heuristic: only an estimated backlog that is both
++    /// deep and sustained for `backlogSustainMs` triggers a reset + IDR, at
++    /// most once per `recoveryCooldownMs`. `queueOverloadedAt` is cleared as
++    /// soon as the backlog recovers, so a one-off burst never triggers.
++    pollBacklog(queueSize: number, now = this.now()): BacklogResult {
++        this.noteQueueSize(queueSize)
++
++        const estimatedQueueDelayMs = queueSize * 1000 / this.fpsValue
++
++        if (estimatedQueueDelayMs > this.thresholds.backlogDelayMs && queueSize > this.thresholds.backlogMinQueue) {
++            this.queueOverloadedAt ??= now
++
++            if (!this.idrOutstandingState
++                && now - this.queueOverloadedAt >= this.thresholds.backlogSustainMs
++                && now - this.lastQueueRecoveryAt >= this.thresholds.recoveryCooldownMs) {
++                this.lastQueueRecoveryAt = now
++                this.queueOverloadedAt = null
++
++                return {
++                    requestIdr: true,
++                    reset: true,
++                    reason: `sustained decoder backlog queue=${queueSize} estimatedDelayMs=${estimatedQueueDelayMs.toFixed(2)}`,
++                }
++            }
++        } else {
++            this.queueOverloadedAt = null
++        }
++
++        return { requestIdr: false, reset: false, reason: null }
++    }
++
++    /// While waiting for a key frame, keep asking for an IDR (throttled), but
++    /// never reset the decoder again. A reset here would discard whatever
++    /// references remain and reset the wait timer, which is how the old code
++    /// could get stuck.
++    pollKeyFrameRetry(now = this.now()): boolean {
++        if (!this.waitingForKeyFrameState) {
++            return false
++        }
++        if (this.keyFrameWaitStartedAt < 0) {
++            this.keyFrameWaitStartedAt = now
++        }
++        if (now - this.keyFrameWaitStartedAt < this.thresholds.keyFrameIdrRetryMs) {
++            return false
++        }
++        if (this.idrOutstandingState && now - this.lastIdrRequestAt < this.thresholds.keyFrameIdrRetryMs) {
++            return false
++        }
++
++        this.keyFrameIdrRetries++
++        return true
++    }
++
++    keyFrameWaitMs(now = this.now()): number {
++        if (!this.waitingForKeyFrameState || this.keyFrameWaitStartedAt < 0) {
++            return -1
++        }
++        return Math.round(now - this.keyFrameWaitStartedAt)
++    }
++
++    /// Returns a warning string when the decoder has queued work but produced
++    /// no output for `stallWarnMs`. An idle static desktop keeps the queue at
++    /// zero, so it never warns. Throttled to one warning per log interval.
++    checkStall(queueSize: number, now = this.now()): string | null {
++        if (queueSize <= 0) {
++            return null
++        }
++
++        const reference = this.lastDecodeAt >= 0 ? this.lastDecodeAt : Math.max(this.lastSubmitAt, this.firstSubmitAt)
++        if (reference < 0 || now - reference < this.thresholds.stallWarnMs) {
++            return null
++        }
++        if (now - this.lastStallLogAt < this.thresholds.logIntervalMs) {
++            return null
++        }
++        this.lastStallLogAt = now
++
++        return `decoder produced no output for ${Math.round(now - reference)}ms while queue=${queueSize} (waitingForKeyFrame=${this.waitingForKeyFrameState}, idrOutstanding=${this.idrOutstandingState})`
++    }
++
++    /// Returns aggregated log lines. Emitted at most once per `logIntervalMs`
++    /// and **only when the window contains something notable**: dropped units,
++    /// errors, resyncs, or an outstanding key-frame wait. Routine frames are
++    /// still counted and exposed through `reportStats`, but they never produce
++    /// log lines, so steady-state streaming stays quiet.
++    drainLogs(queueSize: number, now = this.now()): Array<string> {
++        if (this.lastSummaryAt < 0) {
++            this.lastSummaryAt = now
++            return []
++        }
++        if (now - this.lastSummaryAt < this.thresholds.logIntervalMs) {
++            return []
++        }
++        this.lastSummaryAt = now
++
++        const notable = this.summaryDroppedDelta > 0
++            || this.summaryDroppedTranslator > 0
++            || this.summaryDroppedAfterError > 0
++            || this.summaryErrors > 0
++            || this.summaryResync > 0
++            || this.waitingForKeyFrameState
++            || this.idrOutstandingState
++
++        const sinceLastDecodeMs = this.lastDecodeAt < 0 ? -1 : Math.round(now - this.lastDecodeAt)
++
++        const line = `decoder health: submitted=${this.summarySubmitted}`
++            + ` (key=${this.summarySubmittedKey} delta=${this.summarySubmittedDelta})`
++            + ` decoded=${this.summaryDecoded}`
++            + ` droppedDelta=${this.summaryDroppedDelta}`
++            + ` droppedTranslator=${this.summaryDroppedTranslator}`
++            + ` droppedAfterError=${this.summaryDroppedAfterError}`
++            + ` errors=${this.summaryErrors}`
++            + ` queue=${queueSize} highwater=${this.queueHighwater}`
++            + ` largestCompressedFrame=${this.largestCompressedFrameBytes}B`
++            + ` sinceLastDecodeMs=${sinceLastDecodeMs}`
++            + ` waitingForKeyFrame=${this.waitingForKeyFrameState}`
++            + ` resync=${this.resyncCount}`
++            + ` idrRequests=${this.idrRequests}`
++            + ` keyFrameIdrRetries=${this.keyFrameIdrRetries}`
++
++        this.summarySubmitted = 0
++        this.summarySubmittedKey = 0
++        this.summarySubmittedDelta = 0
++        this.summaryDecoded = 0
++        this.summaryDroppedDelta = 0
++        this.summaryDroppedTranslator = 0
++        this.summaryDroppedAfterError = 0
++        this.summaryErrors = 0
++        this.summaryResync = 0
++
++        return notable ? [line] : []
++    }
++
++    reportStats(out: Record<string, StatValue>, input: DecoderHealthStatsInput, now = this.now()): void {
++        this.noteQueueSize(input.queueSize)
++
++        out.decoderCodec = input.codec ?? "unknown"
++        out.decoderFps = this.fpsValue
++        out.decoderFpsValid = this.fpsIsValid ? 1 : 0
++        out.decoderFpsRaw = this.fpsRaw
++
++        out.decoderSubmittedUnits = this.submittedUnits
++        out.decoderSubmittedKeyUnits = this.submittedKeyUnits
++        out.decoderSubmittedDeltaUnits = this.submittedDeltaUnits
++        out.decoderDecodedOutputs = this.decodedOutputs
++        out.decoderDroppedDeltasBeforeKeyFrame = this.droppedDeltasBeforeKeyFrame
++        out.decoderDroppedTranslatorChunks = this.droppedTranslatorChunks
++        out.decoderDroppedAfterError = this.droppedAfterError
++
++        out.decoderLargestCompressedFrameBytes = this.largestCompressedFrameBytes
++        out.decoderLargestCompressedFrameIsKey = this.largestCompressedFrameIsKey ? 1 : 0
++        out.decoderLargestCompressedFrameTimestampUs = this.largestCompressedFrameTimestampUs
++
++        out.decoderQueueSize = input.queueSize
++        out.decoderQueueHighwater = this.queueHighwater
++        out.decoderSinceLastDecodeMs = this.lastDecodeAt < 0 ? -1 : Math.round(now - this.lastDecodeAt)
++        out.decoderSinceLastSubmitMs = this.lastSubmitAt < 0 ? -1 : Math.round(now - this.lastSubmitAt)
++        out.decoderSinceLastIdrRequestMs = this.lastIdrRequestAt < 0 ? -1 : Math.round(now - this.lastIdrRequestAt)
++
++        out.decoderResyncCount = this.resyncCount
++        out.decoderIdrRequests = this.idrRequests
++        out.decoderIdrOutstanding = this.idrOutstandingState ? 1 : 0
++
++        out.decoderKeyFrameWaiting = (input.waitingForKeyFrame || this.waitingForKeyFrameState) ? 1 : 0
++        out.decoderKeyFrameWaitMs = this.keyFrameWaitMs(now)
++        out.decoderKeyFrameWaits = this.keyFrameWaitCount
++        out.decoderKeyFrameIdrRetries = this.keyFrameIdrRetries
++
++        out.decoderErrors = this.decoderErrors
++        out.decoderErrored = input.errored ? 1 : 0
++    }
++}
+diff --git a/web/stream/video/video_decoder_pipe.ts b/web/stream/video/video_decoder_pipe.ts
+index ab798b6..fd2f7b7 100644
+--- a/web/stream/video/video_decoder_pipe.ts
++++ b/web/stream/video/video_decoder_pipe.ts
+@@ -3,10 +3,12 @@ import { globalObject } from "../../util"
+ import { Logger } from "../log"
+ import { Pipe, PipeInfo } from "../pipeline/index"
+ import { addPipePassthrough } from "../pipeline/pipes"
++import type { StatValue } from "../stats"
+ import { emptyVideoCodecs, } from "../video"
+ import { videoDecoderCodecInBand } from "./codec_level"
+ import { CodecStreamTranslator, H264StreamVideoTranslator, H265StreamVideoTranslator, VIDEO_DECODER_CODECS_OUT_OF_BAND } from "./annex_b_translator"
+ import { DataVideoRenderer, FrameVideoRenderer, VideoDecodeUnit, VideoRendererSetup } from "./index"
++import { VideoDecoderHealth } from "./video_decoder_health"
+ 
+ export const VIDEO_DECODER_CODECS_IN_BAND: Record<keyof VideoFormats, string> = {
+     // avc1 = out of band config, avc3 = in band with sps, pps, idr
+@@ -92,10 +94,14 @@ export class VideoDecoderPipe implements DataVideoRenderer {
+     private fps = 0
+ 
+     private errored = false
++    private decoderClosed = false
+     private config: VideoDecoderConfig | null = null
+     private translator: CodecStreamTranslator | null = null
+     private decoder: VideoDecoder
+ 
++    /// Observability and recovery decisions (backlog, key-frame waits, stats).
++    private health = new VideoDecoderHealth({ clock: () => performance.now() })
++
+     constructor(base: FrameVideoRenderer, logger?: Logger) {
+         this.implementationName = `video_decoder -> ${base.implementationName}`
+         this.logger = logger ?? null
+@@ -112,13 +118,49 @@ export class VideoDecoderPipe implements DataVideoRenderer {
+ 
+     private onError(error: any) {
+         this.errored = true
++        this.health.noteDecoderError()
++
++        // Encoded units buffered before setup can no longer be decoded, so drop
++        // them instead of leaking them for the lifetime of the pipe.
++        this.bufferedUnits.length = 0
+ 
+         this.logger?.debug(`VideoDecoder has an error ${"toString" in error ? error.toString() : `${error}`}`, { type: "fatal" })
+         console.error(error)
+     }
+ 
+     private onOutput(frame: VideoFrame) {
+-        this.base.submitFrame(frame)
++        this.health.noteDecodedOutput(performance.now())
++
++        if (this.errored) {
++            // The downstream pipe never receives this frame, so we own it and
++            // must release it.
++            this.closeFrame(frame)
++            return
++        }
++
++        try {
++            this.base.submitFrame(frame)
++        } catch (e) {
++            // If handing the frame over fails, the frame is still ours.
++            this.closeFrame(frame)
++            this.logger?.debug(`Failed to submit decoded frame: ${"toString" in (e as any) ? (e as any).toString() : e}`)
++        }
++    }
++
++    private closeFrame(frame: VideoFrame) {
++        try {
++            frame.close()
++        } catch {
++            // Ignore: the frame may already be closed.
++        }
++    }
++
++    private safeQueueSize(): number {
++        try {
++            return this.decoder.decodeQueueSize
++        } catch {
++            return 0
++        }
+     }
+ 
+     private async trySetConfig(codec: string) {
+@@ -127,6 +169,9 @@ export class VideoDecoderPipe implements DataVideoRenderer {
+             codedHeight: this.height,
+         }
+ 
++        // NOTE: "prefer-hardware" is only a preference. A browser may return
++        // supported=true and still decode in software, so nothing here should
++        // be reported as proof that hardware acceleration is in use.
+         if (!this.config) {
+             this.config = await getIfConfigSupported({
+                 codec,
+@@ -154,9 +199,17 @@ export class VideoDecoderPipe implements DataVideoRenderer {
+     async setup(setup: VideoRendererSetup): Promise<void> {
+         this.width = setup.width
+         this.height = setup.height
+-        this.fps = setup.fps
+ 
+-        const codec = videoDecoderCodecInBand(setup.codec, setup.width, setup.height, setup.fps)
++        // The stream may report an unusable fps (e.g. 0 when the setting is
++        // missing/malformed). Validating it here keeps the queue estimate
++        // finite and gives the codec-level hint something sane to work with.
++        const fpsValidation = this.health.setFps(setup.fps)
++        this.fps = fpsValidation.fps
++        if (!fpsValidation.valid) {
++            this.logger?.debug(`Invalid stream fps "${setup.fps}" -> using ${fpsValidation.fps} for decoder timing/level estimates`)
++        }
++
++        const codec = videoDecoderCodecInBand(setup.codec, setup.width, setup.height, this.fps)
+             ?? VIDEO_DECODER_CODECS_IN_BAND[setup.codec]
+         await this.trySetConfig(codec)
+ 
+@@ -201,13 +254,12 @@ export class VideoDecoderPipe implements DataVideoRenderer {
+     }
+ 
+     private decoderSetupFinished = false
+-    private requestedIdr = false
+     private needsKeyFrame = true
+ 
+     private bufferedUnits: Array<VideoDecodeUnit> = []
+     submitDecodeUnit(unit: VideoDecodeUnit): void {
+         if (this.errored) {
+-            console.debug("Cannot submit video decode unit because the stream errored")
++            this.health.noteDroppedAfterError()
+             return
+         }
+         if (!this.decoderSetupFinished) {
+@@ -223,11 +275,13 @@ export class VideoDecoderPipe implements DataVideoRenderer {
+             }
+         }
+ 
++        const now = performance.now()
+ 
+         if (this.translator) {
+             const value = this.translator.submitDecodeUnit(unit)
+             if (value.error) {
+                 this.errored = true
++                this.health.noteDecoderError()
+                 this.logger?.debug("VideoDecoder has errored!")
+                 return
+             }
+@@ -235,18 +289,30 @@ export class VideoDecoderPipe implements DataVideoRenderer {
+             const { configure, chunk } = value
+ 
+             if (!chunk) {
+-                console.debug("No chunk received!")
++                // The translator drops delta units until it has seen the
++                // parameter sets in a key frame. Count it (aggregated in the
++                // periodic health log) instead of logging every frame.
++                this.health.noteDroppedTranslatorChunk()
++                this.health.markWaitingForKeyFrame(now)
+                 return
+             }
+ 
+             if (configure) {
+-                console.debug("Resetting video decoder config with", configure)
+-
+                 this.decoder.reset()
+                 this.decoder.configure(configure)
++                this.health.noteResync("translator reconfigure")
++            }
++
++            this.health.noteSubmittedUnit(unit.type, chunk.length, unit.timestampMicroseconds, now)
++            this.health.noteQueueSize(this.safeQueueSize())
+ 
+-                // This likely is an idr
+-                this.requestedIdr = false
++            if (unit.type == "key" && this.translator.hasCodecDescription()) {
++                // Only a key frame that produced a usable codec description
++                // satisfies the outstanding RequestIDR. Delta units must NOT
++                // re-arm the wait state: doing that made every delta look like a
++                // stalled key-frame wait and spammed RequestIdr once per second
++                // on the H264/HEVC (translator) paths.
++                this.health.noteKeyFrameReceived()
+             }
+ 
+             const encodedChunk = new EncodedVideoChunk({
+@@ -258,10 +324,22 @@ export class VideoDecoderPipe implements DataVideoRenderer {
+             this.decoder.decode(encodedChunk)
+         } else {
+             if (unit.type != "key" && this.needsKeyFrame) {
++                // Deltas cannot be decoded before a key frame. This is not an
++                // arbitrary drop, just the required wait.
++                this.health.noteDroppedDelta()
++                this.health.markWaitingForKeyFrame(now)
+                 return
+             }
+-            this.needsKeyFrame = false
+-            this.requestedIdr = false
++
++            if (unit.type == "key") {
++                this.needsKeyFrame = false
++                // A decoded key frame is the only thing that satisfies an
++                // outstanding RequestIDR. Deltas must NOT clear it.
++                this.health.noteKeyFrameReceived()
++            }
++
++            this.health.noteSubmittedUnit(unit.type, unit.data.length, unit.timestampMicroseconds, now)
++            this.health.noteQueueSize(this.safeQueueSize())
+ 
+             const chunk = new EncodedVideoChunk({
+                 type: unit.type,
+@@ -284,24 +362,43 @@ export class VideoDecoderPipe implements DataVideoRenderer {
+             } else {
+                 this.logger?.debug("Failed to configure VideoDecoder because of missing config", { type: "fatal" })
+             }
+-        } else if (this.config) {
+-            this.translator.setBaseConfig(this.config)
++
++            this.health.markWaitingForKeyFrame(performance.now())
++        } else {
++            if (this.config) {
++                this.translator.setBaseConfig(this.config)
++            }
++            // The translator only keeps a codec description if it already had
++            // one; without it we are still waiting for the first key frame.
++            if (!this.translator.hasCodecDescription()) {
++                this.health.markWaitingForKeyFrame(performance.now())
++            }
+         }
+     }
+ 
+     pollRequestIdr(): boolean {
++        const now = performance.now()
++        const queueSize = this.safeQueueSize()
+         let requestIdr = false
+ 
+-        const estimatedQueueDelayMs = this.decoder.decodeQueueSize * 1000 / this.fps
+-        if (estimatedQueueDelayMs > 200 && this.decoder.decodeQueueSize > 2) {
+-            // We have more than 200ms second backlog in the decoder
+-            // -> This decoder is ass, request idr, flush that decoder
++        // Preserved recovery patch: a sustained (>200ms, >2 chunks) backlog
++        // resets the decoder and requests an IDR at most once every 2s. A
++        // short burst caused by TCP delivering a scene change never triggers
++        // because the overload has to persist for 250ms.
++        const backlog = this.health.pollBacklog(queueSize, now)
++        if (backlog.requestIdr) {
++            this.logger?.debug(`Recovering sustained decoder backlog: ${backlog.reason}; requesting idr and resetting decoder`)
++            requestIdr = true
++            this.reset()
++        }
+ 
+-            if (!this.requestedIdr) {
+-                requestIdr = true
+-                this.reset()
+-            }
+-            console.debug(`Requesting idr because of decode queue size(${this.decoder.decodeQueueSize}) and estimated delay of the queue: ${estimatedQueueDelayMs}`)
++        // If we are still waiting for a key frame, keep asking for an IDR
++        // (throttled to ~1s) but do NOT reset the decoder again. Repeated
++        // destructive resets discard references and were making the freeze
++        // worse.
++        if (this.health.pollKeyFrameRetry(now)) {
++            this.logger?.debug(`Still waiting for a key frame (${this.health.keyFrameWaitMs(now)}ms); requesting idr again (throttled)`)
++            requestIdr = true
+         }
+ 
+         if ("pollRequestIdr" in this.base && typeof this.base.pollRequestIdr == "function") {
+@@ -311,14 +408,45 @@ export class VideoDecoderPipe implements DataVideoRenderer {
+         }
+ 
+         if (requestIdr) {
+-            this.requestedIdr = true
++            // Set the request timestamp whenever an IDR is actually generated,
++            // including ones asked for by the base pipe.
++            this.health.requestIdr(now)
++        }
++
++        // Only warn when the decoder still has queued work but produced no
++        // output. An idle static desktop drains the queue and never warns.
++        const stall = this.health.checkStall(queueSize, now)
++        if (stall) {
++            this.logger?.debug(stall)
++        }
++
++        for (const log of this.health.drainLogs(queueSize, now)) {
++            this.logger?.debug(log)
+         }
+ 
+         return requestIdr
+     }
+ 
++    async reportStats(statsObject: Record<string, StatValue>): Promise<void> {
++        this.health.reportStats(statsObject, {
++            queueSize: this.safeQueueSize(),
++            errored: this.errored,
++            codec: this.config?.codec ?? null,
++            waitingForKeyFrame: this.translator ? !this.translator.hasCodecDescription() : this.needsKeyFrame,
++        })
++
++        if (this.base && "reportStats" in this.base && typeof this.base.reportStats == "function") {
++            return await this.base.reportStats(statsObject)
++        }
++    }
++
+     cleanup() {
+-        this.decoder.close()
++        this.bufferedUnits.length = 0
++
++        if (!this.decoderClosed) {
++            this.decoderClosed = true
++            this.decoder.close()
++        }
+ 
+         if ("cleanup" in this.base && typeof this.base.cleanup == "function") {
+             return this.base.cleanup(arguments)

@@ -13,6 +13,11 @@
     # The flake pins its own nixpkgs (nixos-unstable-small); keep that input
     # un-followed and use overlays.pinned for cache hits (see README).
     nix-cachyos-kernel.url = "github:xddxdd/nix-cachyos-kernel/release";
+
+    # Serein (native Discord client). Its flake pins nixos-unstable with Rust
+    # 1.98.1; our nixpkgs 26.05 ships Rust 1.95, which is too old, so keep this
+    # input's nixpkgs un-followed. The package is self-contained.
+    serein.url = "github:ViceVerse-cz/Serein";
   };
 
   outputs =
@@ -103,8 +108,10 @@
           libfprint-cs9711
           resolve-icons
           sigma-file-manager
+          moonlight-web-stream
           sunshine
           ;
+        serein = inputs.serein.packages.${pkgs.stdenv.hostPlatform.system}.default;
       });
 
       formatter = forAllSystems (pkgs: pkgs.nixfmt-rfc-style);

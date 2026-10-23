@@ -7,6 +7,7 @@
     ./vypr.nix
     ./fingerprint.nix
     ./sunshine.nix
+    ./moonlight-web.nix
   ];
 
   # Machine specifics of the source "main" desktop (Intel Core Ultra 200+

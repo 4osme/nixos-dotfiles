@@ -1,0 +1,546 @@
+diff --git a/web/component/host/list.ts b/web/component/host/list.ts
+index 87df859..c8ac61b 100644
+--- a/web/component/host/list.ts
++++ b/web/component/host/list.ts
+@@ -67,6 +67,14 @@ export class HostList extends FetchListComponent<DetailedHost | UndetailedHost,
+         return this.list.get().find(host => host.getHostId() == hostId)
+     }
+ 
++    /// Host id + display name pairs for the settings scope selector.
++    getHostEntries(): { id: number, name: string }[] {
++        return this.list.get().map(host => ({
++            id: host.getHostId(),
++            name: host.getCache()?.name ?? `Host ${host.getHostId()}`,
++        }))
++    }
++
+     private onHostOpenEvent(event: ComponentEvent<Host>) {
+         this.eventTarget.dispatchEvent(new ComponentEvent("ml-hostopen", event.component))
+     }
+diff --git a/web/component/host_settings.test.ts b/web/component/host_settings.test.ts
+new file mode 100644
+index 0000000..eabc0aa
+--- /dev/null
++++ b/web/component/host_settings.test.ts
+@@ -0,0 +1,64 @@
++// @ts-ignore - this project has no type declarations for "bun:test"; the tests
++// run with `bun test` and the import error is suppressed.
++import { expect, test } from "bun:test"
++import { clearHostSettings, hasHostSettings, hostSettingsKey, loadHostSettings, saveHostSettings } from "./host_settings"
++
++class MemoryStorage {
++    private map = new Map<string, string>()
++
++    getItem(key: string): string | null {
++        return this.map.has(key) ? this.map.get(key)! : null
++    }
++    setItem(key: string, value: string): void {
++        this.map.set(key, value)
++    }
++    removeItem(key: string): void {
++        this.map.delete(key)
++    }
++    clear(): void {
++        this.map.clear()
++    }
++}
++
++// The module only touches localStorage inside functions, so installing the
++// stub at module scope is safe even with hoisted imports.
++;(globalThis as any).localStorage = new MemoryStorage()
++
++function settingsSnapshot() {
++    return {
++        bitrate: 4000,
++        videoCodec: "h264" as const,
++    } as any
++}
++
++test("host settings round-trip and stay scoped to the host", () => {
++    localStorage.clear()
++
++    expect(hasHostSettings(7)).toBe(false)
++    expect(loadHostSettings(7)).toBeNull()
++
++    saveHostSettings(7, settingsSnapshot())
++
++    expect(hasHostSettings(7)).toBe(true)
++    expect(hasHostSettings(8)).toBe(false)
++    const loaded = loadHostSettings(7)
++    expect(loaded?.videoCodec).toBe("h264")
++    expect(loaded?.bitrate).toBe(4000)
++
++    clearHostSettings(7)
++    expect(hasHostSettings(7)).toBe(false)
++    expect(loadHostSettings(7)).toBeNull()
++})
++
++test("the key never collides with the global settings key", () => {
++    expect(hostSettingsKey(1)).toBe("mlSettings:host:1")
++    expect(hostSettingsKey(1)).not.toBe("mlSettings")
++})
++
++test("corrupt entries are removed instead of breaking the host", () => {
++    localStorage.clear()
++    localStorage.setItem(hostSettingsKey(3), "{not json")
++
++    expect(loadHostSettings(3)).toBeNull()
++    expect(localStorage.getItem(hostSettingsKey(3))).toBeNull()
++})
+diff --git a/web/component/host_settings.ts b/web/component/host_settings.ts
+new file mode 100644
+index 0000000..9c5cac8
+--- /dev/null
++++ b/web/component/host_settings.ts
+@@ -0,0 +1,44 @@
++// Per-host stream settings overrides.
++//
++// The base stream settings are stored globally under "mlSettings". A host
++// override is a full settings snapshot stored under "mlSettings:host:<hostId>"
++// that is merged over the base when a stream for that host starts. This lets a
++// host which cannot handle the default codec (for example an H264-only host
++// while the base uses AV1) be configured once, without changing the settings
++// for every other host.
++//
++// The module deliberately has no DOM/browser imports (only a type-only import)
++// so its logic can be unit tested.
++import type { Settings } from "./settings_menu"
++
++export const HOST_SETTINGS_PREFIX = "mlSettings:host:"
++
++export function hostSettingsKey(hostId: number): string {
++    return `${HOST_SETTINGS_PREFIX}${hostId}`
++}
++
++export function loadHostSettings(hostId: number): Partial<Settings> | null {
++    try {
++        const json = localStorage.getItem(hostSettingsKey(hostId))
++        if (!json) {
++            return null
++        }
++        return JSON.parse(json)
++    } catch (e) {
++        // Corrupt entries must not break every stream for this host.
++        localStorage.removeItem(hostSettingsKey(hostId))
++        return null
++    }
++}
++
++export function hasHostSettings(hostId: number): boolean {
++    return localStorage.getItem(hostSettingsKey(hostId)) != null
++}
++
++export function saveHostSettings(hostId: number, settings: Settings): void {
++    localStorage.setItem(hostSettingsKey(hostId), JSON.stringify(settings))
++}
++
++export function clearHostSettings(hostId: number): void {
++    localStorage.removeItem(hostSettingsKey(hostId))
++}
+diff --git a/web/component/settings_menu.ts b/web/component/settings_menu.ts
+index 7a63d5d..099c728 100644
+--- a/web/component/settings_menu.ts
++++ b/web/component/settings_menu.ts
+@@ -6,6 +6,7 @@ import { Component, ComponentEvent } from "./index"
+ import { InputComponent, SelectComponent } from "./input"
+ import { SidebarEdge } from "./sidebar/index"
+ import { StreamPermissions } from "../api_bindings";
++import { loadHostSettings } from "./host_settings"
+ 
+ export type Settings = {
+     sidebarEdge: SidebarEdge,
+@@ -39,6 +40,18 @@ export type Settings = {
+ export type StreamCodec = "h264" | "auto" | "h265" | "av1"
+ export type TransportType = "auto" | "webrtc" | "websocket"
+ 
++/// Which settings bucket the menu currently edits: the shared global settings
++/// or the override for one host.
++export type SettingsScope = { type: "global" } | { type: "host", hostId: number }
++export type SettingsScopeHost = { id: number, name: string }
++export type StreamSettingsComponentOptions = {
++    hostScope?: {
++        hosts: SettingsScopeHost[],
++        scope: SettingsScope,
++        hostHasOverride: boolean,
++    }
++}
++
+ import DEFAULT_SETTINGS from "../default_settings"
+ 
+ /// You should use the role default settings instead!
+@@ -75,7 +88,7 @@ function deepMerge(target: any, source: any) {
+     return target
+ }
+ 
+-export function getLocalStreamSettings(defaultSettings: Settings) {
++export function getLocalStreamSettings(defaultSettings: Settings, hostId?: number) {
+     // Start with FULL global defaults
+     let settings = globalDefaultSettings()
+ 
+@@ -94,6 +107,15 @@ export function getLocalStreamSettings(defaultSettings: Settings) {
+         localStorage.removeItem("mlSettings")
+     }
+ 
++    // Per-host overrides win over the shared user settings. Used when starting
++    // a stream for a specific host.
++    if (hostId != null) {
++        const hostOverrides = loadHostSettings(hostId)
++        if (hostOverrides) {
++            settings = deepMerge(settings, hostOverrides)
++        }
++    }
++
+     // Migration
+     if (settings?.pageStyle === "old") {
+         settings.pageStyle = "moonlight"
+@@ -105,6 +127,20 @@ export function setLocalStreamSettings(settings?: Settings) {
+     localStorage.setItem("mlSettings", JSON.stringify(settings))
+ }
+ 
++function settingsScopeValue(scope: SettingsScope): string {
++    return scope.type == "host" ? `host:${scope.hostId}` : "global"
++}
++
++function parseSettingsScope(value: string): SettingsScope {
++    if (value.startsWith("host:")) {
++        const hostId = Number.parseInt(value.slice("host:".length))
++        if (Number.isFinite(hostId)) {
++            return { type: "host", hostId }
++        }
++    }
++    return { type: "global" }
++}
++
+ export type StreamSettingsChangeListener = (event: ComponentEvent<StreamSettingsComponent>) => void
+ 
+ function makeSettingsValid(permissions: StreamPermissions, settings: Settings) {
+@@ -185,7 +221,11 @@ export class StreamSettingsComponent implements Component {
+ 
+     private useSelectElementPolyfill: InputComponent
+ 
+-    constructor(permissions: StreamPermissions, settings: Settings) {
++    private hostScope: StreamSettingsComponentOptions["hostScope"] | null = null
++    private settingsScopeSelect: SelectComponent | null = null
++    private clearHostOverrideButton: HTMLButtonElement | null = null
++
++    constructor(permissions: StreamPermissions, settings: Settings, options?: StreamSettingsComponentOptions) {
+         // Sometimes the normal settings object doesn't have some values, because they change between versions.
+         // Use those as fallback
+         const defaultSettings_ = globalDefaultSettings()
+@@ -202,6 +242,38 @@ export class StreamSettingsComponent implements Component {
+         // Root div
+         this.divElement.classList.add("settings")
+ 
++        // Host override scope. Only the main app passes this; the role default
++        // editors keep the two-argument constructor and see no scope UI.
++        this.hostScope = options?.hostScope ?? null
++        if (this.hostScope) {
++            const scopeHeader = document.createElement("h3")
++            scopeHeader.innerText = i.hostOverride
++            this.divElement.appendChild(scopeHeader)
++
++            const scopeOptions = [{ value: "global", name: i.allHosts }]
++            for (const host of this.hostScope.hosts) {
++                scopeOptions.push({ value: `host:${host.id}`, name: host.name })
++            }
++
++            this.settingsScopeSelect = new SelectComponent("settingsScope", scopeOptions, {
++                displayName: i.hostOverride,
++                preSelectedOption: settingsScopeValue(this.hostScope.scope),
++            })
++            this.settingsScopeSelect.addChangeListener(this.onSettingsScopeChange.bind(this))
++            this.settingsScopeSelect.mount(this.divElement)
++
++            if (this.hostScope.scope.type == "host" && this.hostScope.hostHasOverride) {
++                this.clearHostOverrideButton = document.createElement("button")
++                this.clearHostOverrideButton.innerText = i.clearHostOverride
++                this.clearHostOverrideButton.classList.add("button-fit-content")
++                this.clearHostOverrideButton.addEventListener("click", () => {
++                    // Never clear here: the app decides and rebuilds the menu.
++                    this.divElement.dispatchEvent(new ComponentEvent("ml-scopeclear", this))
++                })
++                this.divElement.appendChild(this.clearHostOverrideButton)
++            }
++        }
++
+         // Sidebar
+         this.sidebarHeader.innerText = i.sidebar
+         this.divElement.appendChild(this.sidebarHeader)
+@@ -457,18 +529,8 @@ export class StreamSettingsComponent implements Component {
+ 
+         // Data Transport
+         const allowedDataTransport = [
+-            { value: "auto", name: i.auto },
++            { value: "websocket", name: i.webSocket },
+         ]
+-        if (this.permissions.allow_transport_webrtc) {
+-            allowedDataTransport.push(
+-                { value: "webrtc", name: "WebRTC" },
+-            )
+-        }
+-        if (this.permissions.allow_transport_websockets) {
+-            allowedDataTransport.push(
+-                { value: "websocket", name: i.webSocket },
+-            )
+-        }
+ 
+         this.language = new SelectComponent("language", getLanguageOptions(), {
+             displayName: i.language,
+@@ -479,7 +541,7 @@ export class StreamSettingsComponent implements Component {
+ 
+         this.dataTransport = new SelectComponent("transport", allowedDataTransport, {
+             displayName: i.dataTransport,
+-            preSelectedOption: settings?.dataTransport ?? defaultSettings_.dataTransport
++            preSelectedOption: "websocket"
+         })
+         this.dataTransport.addChangeListener(this.onSettingsChange.bind(this))
+         this.dataTransport.mount(this.divElement)
+@@ -537,6 +599,27 @@ export class StreamSettingsComponent implements Component {
+         this.divElement.removeEventListener("ml-settingschange", listener as any)
+     }
+ 
++    /// Fired when the user selects a different settings scope. The app reloads
++    /// the menu with the effective settings for the new scope; the currently
++    /// displayed values are NOT saved into the new scope.
++    addScopeChangeListener(listener: StreamSettingsChangeListener) {
++        this.divElement.addEventListener("ml-scopechange", listener as any)
++    }
++    addClearHostOverrideListener(listener: StreamSettingsChangeListener) {
++        this.divElement.addEventListener("ml-scopeclear", listener as any)
++    }
++
++    getSettingsScope(): SettingsScope {
++        if (this.settingsScopeSelect) {
++            return parseSettingsScope(this.settingsScopeSelect.getValue() ?? "global")
++        }
++        return { type: "global" }
++    }
++
++    private onSettingsScopeChange() {
++        this.divElement.dispatchEvent(new ComponentEvent("ml-scopechange", this))
++    }
++
+     getStreamSettings(): Settings {
+         const settings = globalDefaultSettings()
+ 
+diff --git a/web/index.ts b/web/index.ts
+index 41080e7..180a1ab 100644
+--- a/web/index.ts
++++ b/web/index.ts
+@@ -9,7 +9,8 @@ import { setContextMenu } from "./component/context_menu"
+ import { GameList } from "./component/game/list"
+ import { Host } from "./component/host/index"
+ import { App, DetailedRole, DetailedUser } from "./api_bindings"
+-import { getLocalStreamSettings, globalDefaultSettings, setLocalStreamSettings, StreamSettingsComponent } from "./component/settings_menu"
++import { getLocalStreamSettings, globalDefaultSettings, setLocalStreamSettings, SettingsScope, StreamSettingsComponent } from "./component/settings_menu"
++import { clearHostSettings, hasHostSettings, saveHostSettings } from "./component/host_settings"
+ import { adoptRoleDefaultLanguage, getCurrentLanguage, getTranslations } from "./i18n"
+ import { setTouchContextMenuEnabled } from "./polyfill/ios_right_click"
+ import { buildUrl } from "./config_"
+@@ -107,6 +108,8 @@ class MainApp implements Component {
+     private hostList: HostList
+     private gameList: GameList | null = null
+     private settings: StreamSettingsComponent | null = null
++    /// Which settings bucket the settings screen currently edits.
++    private settingsScope: SettingsScope = { type: "global" }
+ 
+     constructor(api: Api, bootstrapRole: DetailedRole) {
+         this.api = api
+@@ -167,11 +170,7 @@ class MainApp implements Component {
+         this.saveRoleDefaultsButton.dataset.variant = "save-button"
+ 
+         // Settings
+-        this.settings = new StreamSettingsComponent(
+-            bootstrapRole.permissions,
+-            getLocalStreamSettings(bootstrapRole.default_settings)
+-        )
+-        this.settings.addChangeListener(this.onSettingsChange.bind(this))
++        this.settings = this.createSettingsComponent()
+ 
+         // Append default elements
+         this.divElement.appendChild(this.topLine)
+@@ -246,9 +245,21 @@ class MainApp implements Component {
+ 
+         const previousLanguage = getLocalStreamSettings(globalDefaultSettings()).language
+         const newSettings = this.settings.getStreamSettings()
+-
+-        // store settings in localStorage
+-        setLocalStreamSettings(newSettings)
++        const scope = this.settings.getSettingsScope()
++
++        if (scope.type == "host") {
++            // Snapshot only this host. Language affects the whole app, so a
++            // language change is also persisted globally.
++            saveHostSettings(scope.hostId, newSettings)
++            if (previousLanguage !== newSettings.language) {
++                const globalSettings = getLocalStreamSettings(globalDefaultSettings())
++                globalSettings.language = newSettings.language
++                setLocalStreamSettings(globalSettings)
++            }
++        } else {
++            // store settings in localStorage
++            setLocalStreamSettings(newSettings)
++        }
+         // apply style
+         setPageStyle(newSettings.pageStyle)
+ 
+@@ -257,6 +268,66 @@ class MainApp implements Component {
+         }
+     }
+ 
++    private createSettingsComponent(): StreamSettingsComponent {
++        const role = this.role
++        if (!role) {
++            throw "settings requested without a role"
++        }
++
++        let scope = this.settingsScope
++        const hostId = scope.type == "host" ? scope.hostId : null
++        const hosts = this.hostList.getHostEntries()
++        if (hostId != null && !hosts.some(host => host.id == hostId)) {
++            // The selected host disappeared; don't keep a selector entry that
++            // does not exist.
++            scope = { type: "global" }
++            this.settingsScope = scope
++        }
++
++        const component = new StreamSettingsComponent(role.permissions, getLocalStreamSettings(role.default_settings, hostId ?? undefined), {
++            hostScope: {
++                hosts,
++                scope,
++                hostHasOverride: hostId != null && hasHostSettings(hostId),
++            },
++        })
++        component.addChangeListener(this.onSettingsChange.bind(this))
++        component.addScopeChangeListener(this.onSettingsScopeChange.bind(this))
++        component.addClearHostOverrideListener(this.onClearHostOverride.bind(this))
++        return component
++    }
++
++    private onSettingsScopeChange() {
++        const scope = this.settings?.getSettingsScope()
++        if (!scope) {
++            return
++        }
++        this.settingsScope = scope
++        this.rebuildSettingsComponent()
++    }
++
++    private onClearHostOverride() {
++        if (this.settingsScope.type != "host") {
++            return
++        }
++        clearHostSettings(this.settingsScope.hostId)
++        this.rebuildSettingsComponent()
++    }
++
++    private rebuildSettingsComponent() {
++        if (!this.settings) {
++            return
++        }
++        const mounted = this.currentDisplay == "settings"
++        if (mounted) {
++            this.settings.unmount(this.divElement)
++        }
++        this.settings = this.createSettingsComponent()
++        if (mounted) {
++            this.settings.mount(this.divElement)
++        }
++    }
++
+     private async onSaveRoleDefaults() {
+         if (!this.settings || !this.role || this.user?.role !== "Admin") {
+             showNotification(I.settings.saveRoleDefaultsFailed)
+@@ -374,6 +445,9 @@ class MainApp implements Component {
+                 this.actionElement.appendChild(this.saveRoleDefaultsButton)
+             }
+ 
++            // Recreate so the host scope list and effective values are current
++            // every time the menu is opened.
++            this.rebuildSettingsComponent()
+             this.settings?.mount(this.divElement)
+ 
+             setAppState({ display: "settings" }, pushIntoHistory)
+diff --git a/web/locales/en.ts b/web/locales/en.ts
+index 59702b5..d7cb736 100644
+--- a/web/locales/en.ts
++++ b/web/locales/en.ts
+@@ -37,6 +37,9 @@ export const en = {
+         rootNotFound: "couldn't find root element",
+     },
+     settings: {
++        hostOverride: "Host Override",
++        allHosts: "All Hosts",
++        clearHostOverride: "Clear host override",
+         sidebar: "Sidebar",
+         sidebarEdge: "Sidebar Edge",
+         hideSidebarButton: "Hide Sidebar Button (reveal on hover)",
+diff --git a/web/locales/fr-FR.ts b/web/locales/fr-FR.ts
+index 8a1f1e7..6539aa2 100644
+--- a/web/locales/fr-FR.ts
++++ b/web/locales/fr-FR.ts
+@@ -39,6 +39,9 @@ export const frFr: Translations = {
+         rootNotFound: "Elément racine introuvable",
+     },
+     settings: {
++        hostOverride: "Surcharge par hôte",
++        allHosts: "Tous les hôtes",
++        clearHostOverride: "Effacer la surcharge de l'hôte",
+         sidebar: "Barre latérale",
+         sidebarEdge: "Bord de la barre latérale",
+         hideSidebarButton: "Masquer le bouton de la barre latérale (visible au survol)",
+diff --git a/web/locales/ko-KR.ts b/web/locales/ko-KR.ts
+index 5763a8a..9e770e2 100644
+--- a/web/locales/ko-KR.ts
++++ b/web/locales/ko-KR.ts
+@@ -39,6 +39,9 @@ export const koKR: Translations = {
+         rootNotFound: "루트 요소를 찾을 수 없습니다.",
+     },
+     settings: {
++        hostOverride: "호스트별 재정의",
++        allHosts: "모든 호스트",
++        clearHostOverride: "호스트 재정의 삭제",
+         sidebar: "사이드바",
+         sidebarEdge: "사이드바 위치",
+         hideSidebarButton: "사이드바 버튼 숨기기 (마우스를 올리면 표시)",
+diff --git a/web/locales/pt-BR.ts b/web/locales/pt-BR.ts
+index f434522..6593f81 100644
+--- a/web/locales/pt-BR.ts
++++ b/web/locales/pt-BR.ts
+@@ -39,6 +39,9 @@ export const ptBR: Translations = {
+         rootNotFound: "elemento raiz não encontrado",
+     },
+     settings: {
++        hostOverride: "Substituição por host",
++        allHosts: "Todos os hosts",
++        clearHostOverride: "Limpar substituição do host",
+         sidebar: "Barra Lateral",
+         sidebarEdge: "Posição da Barra Lateral",
+         hideSidebarButton: "Ocultar botão da barra lateral (aparece ao passar o mouse)",
+diff --git a/web/locales/zh-CN.ts b/web/locales/zh-CN.ts
+index 27c981b..e566659 100644
+--- a/web/locales/zh-CN.ts
++++ b/web/locales/zh-CN.ts
+@@ -39,6 +39,9 @@ export const zhCN: Translations = {
+         rootNotFound: "找不到根元素",
+     },
+     settings: {
++        hostOverride: "按主机覆盖",
++        allHosts: "所有主机",
++        clearHostOverride: "清除主机覆盖",
+         sidebar: "侧边栏",
+         sidebarEdge: "侧边栏位置",
+         hideSidebarButton: "隐藏侧边栏按钮（悬停时显示）",
+diff --git a/web/stream.ts b/web/stream.ts
+index 85e87df..d6fdaa5 100644
+--- a/web/stream.ts
++++ b/web/stream.ts
+@@ -182,7 +182,7 @@ class ViewerApp implements Component {
+     constructor(api: Api, hostId: number, appId: number, bootstrapRole: DetailedRole, options?: Partial<Settings>) {
+         this.api = api
+ 
+-        const defaultSettings = getLocalStreamSettings(bootstrapRole.default_settings)
++        const defaultSettings = getLocalStreamSettings(bootstrapRole.default_settings, hostId)
+         const settings = {
+             ...defaultSettings,
+             ...options,

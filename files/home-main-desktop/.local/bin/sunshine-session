@@ -1,0 +1,215 @@
+#!/usr/bin/env python3
+"""Manual Sunshine session helper for main-desktop.
+
+  start   create the HEADLESS-1 virtual output (1920x1080@60), switch Hyprland
+          to it (physical outputs disabled) and restart the Sunshine user unit
+  stop    stop Sunshine, restore the physical monitor layout and remove the
+          virtual output
+  status  print the Sunshine/cloudflared units and the current monitor layout
+
+`--tunnel` also starts/stops the cloudflared-tunnel unit. Sunshine and the
+tunnel are intentionally not started by systemd at login. The display profile
+is defined in ~/.config/hypr/host.lua; the marker written by
+hypr-stream-display.py selects it.
+"""
+import argparse
+import json
+import os
+from pathlib import Path
+import re
+import subprocess
+import sys
+import time
+
+RUNTIME = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"))
+os.environ.setdefault("XDG_RUNTIME_DIR", str(RUNTIME))
+STATE_DIR = RUNTIME / "sunshine-hypr-display"
+CONFIG = Path.home() / ".config/sunshine/sunshine.conf"
+HELPER = Path.home() / ".config/sunshine/hypr-stream-display.py"
+HEADLESS = "HEADLESS-1"
+HEADLESS_PREFIX = "HEADLESS-"
+MARKERS = ("1080p.active", "native.active", "state.json")
+
+
+def log(message):
+    print(f"sunshine-session: {message}", file=sys.stderr, flush=True)
+
+
+def run(*args, env=None, check=True):
+    return subprocess.run(
+        args, env=env, text=True, capture_output=True, check=check
+    )
+
+
+def hypr_env(signature=None):
+    try:
+        instances = json.loads(run("hyprctl", "instances", "-j").stdout)
+    except (subprocess.SubprocessError, json.JSONDecodeError, FileNotFoundError):
+        return None
+    if signature:
+        instances = [item for item in instances if item["instance"] == signature]
+    if len(instances) != 1:
+        return None
+    env = dict(os.environ, XDG_RUNTIME_DIR=str(RUNTIME))
+    env["HYPRLAND_INSTANCE_SIGNATURE"] = instances[0]["instance"]
+    return env
+
+
+def require_hypr():
+    env = hypr_env()
+    if not env:
+        raise RuntimeError("Hyprland is not running; log in first")
+    return env
+
+
+def monitors(env):
+    return json.loads(run("hyprctl", "monitors", "-j", env=env).stdout)
+
+
+def remove_output(env, name):
+    """Remove an output, but never the last remaining one."""
+    remaining = [item for item in monitors(env) if item["name"] != name]
+    if remaining:
+        run("hyprctl", "output", "remove", name, env=env)
+
+
+def remove_headless(env):
+    for name in [
+        item["name"] for item in monitors(env) if item["name"].startswith(HEADLESS_PREFIX)
+    ]:
+        remove_output(env, name)
+
+
+def ensure_headless(env, name=HEADLESS):
+    existing = [
+        item["name"] for item in monitors(env) if item["name"].startswith(HEADLESS_PREFIX)
+    ]
+    if name in existing:
+        return name
+    for other in existing:
+        if other != name:
+            remove_output(env, other)
+    run("hyprctl", "output", "create", "headless", name, env=env)
+    for _ in range(30):
+        time.sleep(0.1)
+        if name in {item["name"] for item in monitors(env)}:
+            return name
+    raise RuntimeError(f"headless output {name} did not appear")
+
+
+def set_config(key, value):
+    CONFIG.parent.mkdir(parents=True, exist_ok=True)
+    lines = CONFIG.read_text().splitlines() if CONFIG.exists() else []
+    pattern = re.compile(rf"^\s*{re.escape(key)}\s*=")
+    replaced = False
+    output = []
+    for line in lines:
+        if pattern.match(line):
+            output.append(f"{key} = {value}")
+            replaced = True
+        else:
+            output.append(line)
+    if not replaced:
+        output.append(f"{key} = {value}")
+    CONFIG.write_text("\n".join(output) + "\n")
+
+
+def sunshine(action, check=True):
+    # The unit is defined by home/sunshine.nix but intentionally not enabled.
+    run("systemctl", "--user", action, "sunshine", check=check)
+
+
+def tunnel(action, check=True):
+    run("systemctl", "--user", action, "cloudflared-tunnel", check=check)
+
+
+def clear_state():
+    for name in MARKERS:
+        (STATE_DIR / name).unlink(missing_ok=True)
+
+
+def start(with_tunnel=False):
+    env = require_hypr()
+    name = ensure_headless(env)
+    set_config("capture", "wlr")
+    set_config("output_name", name)
+    # Park the virtual output first (host.lua's idle branch), so Sunshine's
+    # encoder probe sees a live monitor and the physical screens stay on while
+    # the service starts. hypr-stream-display.py then applies the stream
+    # profile immediately.
+    run("hyprctl", "reload", env=env)
+    sunshine("restart")
+    subprocess.run([sys.executable, str(HELPER), "start"], env=env, check=True)
+    if with_tunnel:
+        tunnel("start")
+    log(f"started: Sunshine is capturing {name} (1920x1080@60); physical outputs disabled")
+    if with_tunnel:
+        log("cloudflared-tunnel started")
+
+
+def stop(with_tunnel=False):
+    sunshine("stop", check=False)
+    env = hypr_env()
+    if env:
+        subprocess.run(
+            [sys.executable, str(HELPER), "stop"], env=env, check=False
+        )
+    clear_state()
+    if env:
+        run("hyprctl", "reload", env=env)
+        remove_headless(env)
+    if with_tunnel:
+        tunnel("stop", check=False)
+    log("stopped: Sunshine stopped, physical monitors restored, HEADLESS-1 removed")
+    if with_tunnel:
+        log("cloudflared-tunnel stopped")
+
+
+def status():
+    for unit in ("sunshine", "cloudflared-tunnel"):
+        result = run("systemctl", "--user", "is-active", unit, check=False)
+        print(f"{unit}: {result.stdout.strip() or result.stderr.strip()}")
+    env = hypr_env()
+    if not env:
+        print("hyprland: not running")
+        return
+    for monitor in monitors(env):
+        print(
+            "monitor: {name} {width}x{height}@{rate:.3f} at {x}x{y} disabled={disabled}".format(
+                name=monitor["name"],
+                width=monitor["width"],
+                height=monitor["height"],
+                rate=monitor["refreshRate"],
+                x=monitor["x"],
+                y=monitor["y"],
+                disabled=monitor.get("disabled", False),
+            )
+        )
+    for name in MARKERS[:-1]:
+        if (STATE_DIR / name).exists():
+            print(f"marker: {name}")
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("action", choices=("start", "stop", "status"))
+    parser.add_argument(
+        "--tunnel",
+        action="store_true",
+        help="also start/stop the cloudflared-tunnel user unit",
+    )
+    args = parser.parse_args()
+    if args.action == "start":
+        start(args.tunnel)
+    elif args.action == "stop":
+        stop(args.tunnel)
+    else:
+        status()
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as error:
+        log(str(error))
+        sys.exit(1)

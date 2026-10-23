@@ -2,7 +2,7 @@
 # carried (quickshell shell, hyprbind, hypremoji, clipse, …). Qt/Kvantum
 # theming stays on the shipped dotfiles (apply-theme.sh edits the same files),
 # so do not enable the Home Manager qt/gtk modules here.
-{ pkgs, ... }:
+{ pkgs, inputs, ... }:
 {
   home.packages = with pkgs; [
     # --- tools (AGENTS.md) ---
@@ -11,7 +11,8 @@
     gh # github-cli
     tea # gitea CLI
     vscode
-    vesktop
+    vesktop # fallback until the NixOS migration is finished
+    inputs.serein.packages.${pkgs.stdenv.hostPlatform.system}.default
     mission-center
     bitwarden-desktop
     google-chrome

@@ -35,7 +35,12 @@ end
 -- registration (after the rules above) makes them apply on `hyprctl reload`.
 hl.layout.register("hyprtomic-refresh", { recalculate = function() end })
 
--- Sunshine: temporary fixed 1080p30 / dwindle profile while streaming.
+-- Sunshine streaming profiles (manual `sunshine-session start` / `stop`).
+-- The manual helper creates the HEADLESS-1 virtual output (FullHD); while a
+-- stream profile marker exists this config moves that output to 0x0 and
+-- disables the physical HDMI outputs. `sunshine-session stop` removes the
+-- marker and the virtual output, which restores monitors.lua.
+--
 -- Persistent normal mode. Keep this in sync with monitors.lua:
 -- HDMI-A-1 (4K) sits to the right of the rotated HDMI-A-2.
 hl.monitor({ output = "HDMI-A-1", mode = "3840x2160@60", position = "648x0", scale = 1.0, transform = 0 })
@@ -43,10 +48,43 @@ hl.monitor({ output = "HDMI-A-1", mode = "3840x2160@60", position = "648x0", sca
 local sunshineRuntime = os.getenv("XDG_RUNTIME_DIR") or "/run/user/1000"
 local sunshineProfile = io.open(sunshineRuntime .. "/sunshine-hypr-display/1080p.active", "r")
 local sunshineNative = io.open(sunshineRuntime .. "/sunshine-hypr-display/native.active", "r")
+
+-- capture/output_name in the (unmanaged) Sunshine config are written by
+-- `sunshine-session`. Read them so the streaming layout follows output_name
+-- instead of hardcoding the virtual output.
+local function sunshineConfig(key)
+    local path = (os.getenv("HOME") or "") .. "/.config/sunshine/sunshine.conf"
+    local file = io.open(path, "r")
+    if not file then
+        return nil
+    end
+    local value = nil
+    for line in file:lines() do
+        local match = line:match("^%s*" .. key .. "%s*=%s*(%S+)")
+        if match then
+            value = match
+        end
+    end
+    file:close()
+    return value
+end
+
+local function applySunshineLayout(mode)
+    local output = sunshineConfig("output_name") or "HEADLESS-1"
+    if output == "" then
+        output = "HEADLESS-1"
+    end
+    hl.monitor({ output = output, mode = mode, position = "0x0", scale = 1.0, transform = 0 })
+    for _, other in ipairs({ "HDMI-A-1", "HDMI-A-2" }) do
+        if other ~= output then
+            hl.monitor({ output = other, disabled = true })
+        end
+    end
+end
+
 if sunshineProfile then
     sunshineProfile:close()
-    hl.monitor({ output = "HDMI-A-1", mode = "1920x1080@60", position = "0x0", scale = 1.0, transform = 0 })
-    hl.monitor({ output = "HDMI-A-2", disabled = true })
+    applySunshineLayout("1920x1080@60")
     for i = 1, 8 do
         hl.workspace_rule({ workspace = tostring(i), layout = "dwindle" })
     end
@@ -55,11 +93,19 @@ if sunshineProfile then
 elseif sunshineNative then
     sunshineNative:close()
     -- Native streaming: keep the resolution but disable the other outputs and
-    -- pin HDMI-A-1 to the origin. This keeps absolute mouse input exact even
-    -- when Sunshine could not query the Wayland monitor layout (single monitor
-    -- at 0x0 means the raw KMS offsets are already correct).
-    hl.monitor({ output = "HDMI-A-1", mode = "preferred", position = "0x0", scale = 1.0, transform = 0 })
-    hl.monitor({ output = "HDMI-A-2", disabled = true })
+    -- pin the captured output to the origin. This keeps absolute mouse input
+    -- exact even when Sunshine could not query the Wayland monitor layout
+    -- (single monitor at 0x0 means the raw KMS offsets are already correct).
+    applySunshineLayout("preferred")
+else
+    -- Sunshine is running but no client session is active: keep the virtual
+    -- output alive (Sunshine's encoder probe needs a live output) and park it
+    -- far to the right so monitors.lua keeps the physical layout. This also
+    -- catches a HEADLESS-* output left behind by a crashed session.
+    local output = sunshineConfig("output_name") or "HEADLESS-1"
+    if output:find("^HEADLESS%-") then
+        hl.monitor({ output = output, mode = "1920x1080@60", position = "10000x0", scale = 1.0, transform = 0 })
+    end
 end
 
 -- Also handles a stream started at SDDM before this Hyprland session exists.

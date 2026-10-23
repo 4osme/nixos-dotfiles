@@ -1,0 +1,95 @@
+diff --git a/src/stream/proto/audio/mod.rs b/src/stream/proto/audio/mod.rs
+index 6057d01..1e47b65 100644
+--- a/src/stream/proto/audio/mod.rs
++++ b/src/stream/proto/audio/mod.rs
+@@ -66,6 +66,7 @@ pub enum AudioStreamEvent {
+ 
+ pub struct AudioStream {
+     addr: SocketAddr,
++    last_now: Instant,
+     last_frame: Instant,
+     dropped_frames: bool,
+     ping_sender: PingSender,
+@@ -86,6 +87,7 @@ impl AudioStream {
+ 
+         Self {
+             addr: config.addr,
++            last_now: now,
+             last_frame: now,
+             dropped_frames: true,
+             ping_sender: PingSender::new(
+@@ -164,7 +166,13 @@ impl UdpStream for AudioStream {
+         if !self.dropped_frames {
+             None
+         } else {
+-            Some(self.last_frame + MAXIMUM_SAMPLE_WAIT)
++            // A host without working audio capture never sends a frame, so
++            // dropped_frames stays true and last_frame stays at the stream
++            // creation time. Reporting `last_frame + MAXIMUM_SAMPLE_WAIT` would
++            // then be an already elapsed deadline forever, which makes the tokio
++            // driver re-fire its timer without ever yielding (same busy loop as
++            // in VideoStream::poll_timeout). Report the next check instead.
++            Some(self.last_now + MAXIMUM_SAMPLE_WAIT)
+         }
+     }
+ 
+@@ -196,6 +204,8 @@ impl UdpStream for AudioStream {
+     }
+ 
+     fn handle_timeout(&mut self, now: Instant) -> Result<(), Self::Error> {
++        self.last_now = now;
++
+         self.ping_sender.handle_timeout(now);
+ 
+         if self.last_frame + MAXIMUM_SAMPLE_WAIT < now {
+diff --git a/src/stream/proto/control/mod.rs b/src/stream/proto/control/mod.rs
+index 78a208f..2bda5a6 100644
+--- a/src/stream/proto/control/mod.rs
++++ b/src/stream/proto/control/mod.rs
+@@ -295,7 +295,13 @@ impl ControlStream {
+                         self = ?self,
+                         "not sending periodic ping because the control stream (via enet) is not connected yet."
+                     );
+-                    // We are not connected yet -> we cannot send a ping
++                    // We are not connected yet -> we cannot send a ping. Advance the
++                    // deadline anyway: leaving `last_ping` frozen makes
++                    // `poll_timeout()` report an already elapsed instant forever,
++                    // which turns the driver loop into a busy loop (the same class
++                    // of bug as in the media streams) and hides that the control
++                    // channel is gone.
++                    self.last_ping = Some(self.last_now);
+                     return Ok(());
+                 }
+                 Err(err) => return Err(err),
+diff --git a/src/stream/proto/video/mod.rs b/src/stream/proto/video/mod.rs
+index c7d50cb..8e2138b 100644
+--- a/src/stream/proto/video/mod.rs
++++ b/src/stream/proto/video/mod.rs
+@@ -44,6 +44,11 @@ const STALL_TIMEOUT: Duration = Duration::from_millis(2000);
+ /// The time between each idr request
+ const IDR_REQUEST_TIMEOUT: Duration = Duration::from_millis(1000);
+ 
++/// Smallest timeout reported while the stream is stalled. See
++/// [VideoStream::poll_timeout]: a deadline of "now" must never be returned, or
++/// a driver can re-fire its timer in a tight loop and never yield.
++const IDR_WAIT_MINIMUM: Duration = Duration::from_millis(1);
++
+ #[derive(Debug, Error)]
+ pub enum VideoStreamError {
+     #[error("depayloader: {0}")]
+@@ -285,7 +290,14 @@ impl UdpStream for VideoStream {
+     }
+ 
+     fn poll_timeout(&self) -> Option<Instant> {
+-        Some(self.last_now + self.wait_until_idr())
++        // wait_until_idr() saturates to zero while the stream is stalled (no
++        // frame delivered for STALL_TIMEOUT, for example while waiting for the
++        // first key frame). A deadline of "now" makes every driver re-arm and
++        // immediately re-fire its timer, which can turn the driver loop into a
++        // busy loop that never returns to the caller: the queued events (frames,
++        // IDR requests) are never delivered and the control stream is not
++        // serviced. Keep a small floor so the loop always makes progress.
++        Some(self.last_now + self.wait_until_idr().max(IDR_WAIT_MINIMUM))
+     }
+ 
+     fn poll_event(&mut self) -> Option<Self::Event> {

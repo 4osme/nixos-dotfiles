@@ -2,8 +2,8 @@
 """Apply a temporary Hyprland streaming profile; reload normal settings on exit.
 
 Profiles (selected by Sunshine's app preparation commands):
-  1080p  - force the streamed output to 1920x1080@30, disable other outputs,
-           use the dwindle layout while streaming
+  1080p  - create/use the HEADLESS-1 virtual output at 1920x1080@60, disable
+           the physical outputs and use the dwindle layout while streaming
   native - keep the current resolution, disable the other outputs
 Both profiles pin the streamed output to the origin so Sunshine's absolute
 mouse mapping stays exact even when its Wayland layout query fails.
@@ -20,11 +20,13 @@ import sys
 import time
 
 RUNTIME = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"))
+os.environ.setdefault("XDG_RUNTIME_DIR", str(RUNTIME))
 DIRECTORY = RUNTIME / "sunshine-hypr-display"
 STATE = DIRECTORY / "state.json"
 ACTIVE_1080P = DIRECTORY / "1080p.active"
 ACTIVE_NATIVE = DIRECTORY / "native.active"
 MODE = re.compile(r"^(\d+)x(\d+)@(\d+(?:\.\d+)?)(?:Hz)?$")
+HEADLESS_PREFIX = "HEADLESS-"
 LOG = Path.home() / ".config/sunshine/sunshine.log"
 
 
@@ -83,6 +85,44 @@ def run(*args, env=None):
     return subprocess.check_output(args, env=env, text=True, stderr=subprocess.PIPE, timeout=5)
 
 
+def monitors(env):
+    return json.loads(run("hyprctl", "monitors", "-j", env=env))
+
+
+def headless_outputs(env):
+    return [item["name"] for item in monitors(env) if item["name"].startswith(HEADLESS_PREFIX)]
+
+
+def ensure_headless(env, name):
+    """Create (or adopt) the virtual FullHD output Sunshine will capture."""
+    existing = headless_outputs(env)
+    if name in existing:
+        return name
+    # Remove stale HEADLESS-* outputs left by a crashed session so the layout
+    # does not grow an extra monitor on every stream.
+    for other in existing:
+        if other != name:
+            remove_output(env, other)
+    run("hyprctl", "output", "create", "headless", name, env=env)
+    for _ in range(30):
+        time.sleep(0.1)
+        if name in {item["name"] for item in monitors(env)}:
+            return name
+    raise RuntimeError(f"headless output {name} did not appear")
+
+
+def remove_output(env, name):
+    """Remove an output, but never the last remaining one."""
+    remaining = [item for item in monitors(env) if item["name"] != name]
+    if remaining:
+        run("hyprctl", "output", "remove", name, env=env)
+
+
+def remove_headless(env):
+    for name in headless_outputs(env):
+        remove_output(env, name)
+
+
 def instance_env(signature=None):
     # Before login, the user runtime/Hyprland instance may not exist at all.
     # This is expected at SDDM and must not fail Sunshine's preparation hook.
@@ -138,25 +178,34 @@ def reconcile(signature=None):
             STATE.unlink(missing_ok=True)
             return
         if state.get("connected") is False:
-            if active_marker(state).exists():
-                restore(state, env)
-                state.pop("instance", None)
-                save(state)
-                log("stream paused/disconnected; normal settings restored")
+            # A disconnected/paused stream ends the request: drop the state so
+            # the watcher does not reload the config forever.
+            state["active"] = False
+            save(state)
+            restore(state, env)
+            STATE.unlink(missing_ok=True)
+            log("stream paused/disconnected; normal settings restored")
             return
         signature = env["HYPRLAND_INSTANCE_SIGNATURE"]
         marker = active_marker(state)
         if state.get("instance") == signature and marker.exists():
             return
-        monitors = json.loads(run("hyprctl", "monitors", "-j", env=env))
-        monitor = next((item for item in monitors if item["name"] == state["output"]), None)
+        monitor_list = monitors(env)
+        monitor = next((item for item in monitor_list if item["name"] == state["output"]), None)
+        if not monitor and state["output"].startswith(HEADLESS_PREFIX):
+            ensure_headless(env, state["output"])
+            monitor_list = monitors(env)
+            monitor = next((item for item in monitor_list if item["name"] == state["output"]), None)
         if not monitor:
             raise ValueError(f"output {state['output']} is not active")
         profile = state.get("profile", "1080p")
         if profile == "1080p":
-            mode = select_mode(monitor, 1920, 1080, 30)
-            if abs(float(MODE.fullmatch(mode)[3]) - 30) > 0.03:
-                raise ValueError("DP-1 does not support the fixed 1080p30 profile")
+            if state["output"].startswith(HEADLESS_PREFIX):
+                mode = "1920x1080@60"
+            else:
+                mode = select_mode(monitor, 1920, 1080, 60)
+                if abs(float(MODE.fullmatch(mode)[3]) - 60) > 0.03:
+                    raise ValueError(f"{state['output']} does not support the fixed 1080p60 profile")
         state["instance"] = signature
         save(state)
         ACTIVE_1080P.unlink(missing_ok=True)
@@ -166,22 +215,32 @@ def reconcile(signature=None):
         if profile == "native":
             log("applied native (sub-monitor disabled) streaming profile")
         else:
-            log("applied 1080p30 / dwindle streaming profile")
+            log("applied 1080p60 / dwindle streaming profile on the virtual output")
 
 
 def start(profile="1080p"):
-    width, height, fps = 1920, 1080, 30
+    width, height, fps = 1920, 1080, 60
     if min(width, height, fps) <= 0:
         raise ValueError("invalid client dimensions or FPS")
+    # At SDDM there is no user Hyprland to reconfigure. Skip cleanly instead
+    # of leaving a marker that the session would apply before Sunshine has
+    # switched its capture backend (kms -> wlr).
+    env = instance_env()
+    if env is None:
+        log("no Hyprland instance yet; skipping the streaming profile (KMS/pre-login)")
+        return
     config = Path.home() / ".config/sunshine/sunshine.conf"
-    output = "DP-1"
-    for line in config.read_text().splitlines():
-        if line.strip().startswith("output_name") and "=" in line:
-            output = line.split("=", 1)[1].strip()
+    output = "HEADLESS-1"
+    if config.exists():
+        for line in config.read_text().splitlines():
+            if line.strip().startswith("output_name") and "=" in line:
+                output = line.split("=", 1)[1].strip()
     if not output:
         raise ValueError("set Sunshine output_name to an explicit Hyprland output")
+    if output.startswith(HEADLESS_PREFIX):
+        output = ensure_headless(env, output)
     try:
-        pid = int(run("systemctl", "show", "sunshine", "-p", "MainPID", "--value").strip())
+        pid = int(run("systemctl", "--user", "show", "sunshine", "-p", "MainPID", "--value").strip())
     except (ValueError, subprocess.SubprocessError):
         pid = 0
     with locked():
@@ -228,6 +287,8 @@ def watch():
             return  # Config reloads must not create duplicate watchers.
         last_error = None
         while (RUNTIME / "hypr" / signature / ".socket.sock").exists():
+            if instance_env(signature) is None:
+                return  # the instance is gone; do not keep a stale watcher alive
             try:
                 reconcile(signature)
                 last_error = None
@@ -242,7 +303,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=("start", "stop", "watch", "status"))
     parser.add_argument("--profile", choices=("1080p", "native"), default="1080p",
-                        help="start: 1080p = fixed 1080p30 + dwindle; native = keep the "
+                        help="start: 1080p = fixed 1080p60 + dwindle; native = keep the "
                              "resolution but disable the other monitors while streaming")
     args = parser.parse_args()
     if args.action == "status":

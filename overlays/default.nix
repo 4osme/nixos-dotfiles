@@ -13,6 +13,7 @@ final: prev: {
   libfprint-cs9711 = final.callPackage ../pkgs/libfprint-cs9711 { };
   resolve-icons = final.callPackage ../pkgs/resolve-icons { };
   sigma-file-manager = final.callPackage ../pkgs/sigma-file-manager { };
+  moonlight-web-stream = final.callPackage ../pkgs/moonlight-web-stream { };
 
   # nixpkgs 26.05's tela-circle-icon-theme ships a few dangling XSI alias
   # symlinks and the fixup check rejects the build (so it is not on
