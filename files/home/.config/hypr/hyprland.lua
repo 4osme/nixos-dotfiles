@@ -291,7 +291,7 @@ hl.bind(mainMod .. " + J", hl.dsp.layout("togglesplit"), { desc = "スプリッ�
 hl.bind(mainMod .. " + L", hl.dsp.exec_cmd("hyprlock"), { desc = "画面ロック" })
 hl.bind(mainMod .. " + C", hl.dsp.exec_cmd("google-chrome-stable"), { desc = "Chrome を開く" })
 hl.bind(mainMod .. " + T", hl.dsp.exec_cmd("google-chrome-stable --profile-directory=Default --app-id=lodlkdfmihgonocnmddehnfgiljnadcf"), { desc = "X を開く (Chromeアプリ)" })
-hl.bind(mainMod .. " + D", hl.dsp.exec_cmd("serein"), { desc = "Serein を開く" })
+hl.bind(mainMod .. " + D", hl.dsp.exec_cmd("vesktop"), { desc = "Vesktop を開く" })
 hl.bind(mainMod .. " + M", hl.dsp.exec_cmd("missioncenter"), { desc = "Mission Center (システムモニタ)" })
 hl.bind(mainMod .. " + B", hl.dsp.exec_cmd("bitwarden"), { desc = "Bitwarden を開く" })
 
