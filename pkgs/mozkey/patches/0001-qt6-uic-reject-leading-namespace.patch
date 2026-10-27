@@ -1,0 +1,27 @@
+Drop the leading "::" from the namespaced custom widget class.
+
+Qt 6.12's uic rejects a custom widget class name that starts with "::"
+("Invalid class name"), so the dictionary tool UI cannot be compiled.
+Upstream google/mozc uses the same class name without the leading "::",
+which is what uic expects.
+
+--- a/src/gui/dictionary_tool/dictionary_tool.ui
++++ b/src/gui/dictionary_tool/dictionary_tool.ui
+@@ -52,7 +52,7 @@
+        <enum>Qt::Horizontal</enum>
+       </property>
+       <widget class="QListWidget" name="dic_list_"/>
+-      <widget class="::mozc::gui::DictionaryContentTableWidget" name="dic_content_"/>
++      <widget class="mozc::gui::DictionaryContentTableWidget" name="dic_content_"/>
+      </widget>
+     </item>
+    </layout>
+@@ -78,7 +78,7 @@
+    <container>1</container>
+   </customwidget>
+   <customwidget>
+-   <class>::mozc::gui::DictionaryContentTableWidget</class>
++   <class>mozc::gui::DictionaryContentTableWidget</class>
+    <extends>QTableWidget</extends>
+    <header>gui/dictionary_tool/dictionary_content_table_widget.h</header>
+   </customwidget>
