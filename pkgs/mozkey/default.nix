@@ -22,7 +22,6 @@
   gettext,
   gnutar,
   makeWrapper,
-  unzip,
   autoPatchelfHook,
   fcitx5,
   qt6,
@@ -65,20 +64,23 @@ let
     '') fetchedArchives}
   '';
 
-  # The material design icons share their file name, so they are referenced by
-  # URL instead of being put into the distdir.
+  # The material design icons are fetched separately: three of them share
+  # their file name and the icon archive is assembled by hand anyway.
   materialIcon =
     name: hash:
     fetchurl {
-      url = "https://raw.githubusercontent.com/google/material-design-icons/4.0.0/src/action/${name}";
+      url = "https://raw.githubusercontent.com/google/material-design-icons/4.0.0/${name}";
       inherit hash;
       name = builtins.replaceStrings [ "/" ] [ "-" ] name;
     };
 
   materialIcons = {
-    dictionary = materialIcon "chrome_reader_mode/materialiconsoutlined/24px.svg" "sha256-pMe5v7RCp0l7ctdDWMMQNMT+8asqUGWYNHhFgHUawE0=";
-    properties = materialIcon "settings/materialiconsround/24px.svg" "sha256-mwGxM74cr/xoDxMtOF0OWUJi1s/Sl1mmPEKAULg/5ig=";
-    tool = materialIcon "build/materialicons/24px.svg" "sha256-3zT7o9CXeNtpUDojtoh2EFHb9ltbzLDXtynGn/YcOAQ=";
+    dictionarySvg = materialIcon "src/action/chrome_reader_mode/materialiconsoutlined/24px.svg" "sha256-pMe5v7RCp0l7ctdDWMMQNMT+8asqUGWYNHhFgHUawE0=";
+    propertiesSvg = materialIcon "src/action/settings/materialiconsround/24px.svg" "sha256-mwGxM74cr/xoDxMtOF0OWUJi1s/Sl1mmPEKAULg/5ig=";
+    toolSvg = materialIcon "src/action/build/materialicons/24px.svg" "sha256-3zT7o9CXeNtpUDojtoh2EFHb9ltbzLDXtynGn/YcOAQ=";
+    dictionaryPng = materialIcon "png/action/chrome_reader_mode/materialiconsoutlined/48dp/1x/outline_chrome_reader_mode_black_48dp.png" "sha256-bSrHvvoDjU8y4HE2KTrK9dhkWk2uy20GPzS+L/6lm1U=";
+    propertiesPng = materialIcon "png/action/settings/materialiconsround/48dp/1x/round_settings_black_48dp.png" "sha256-xK6Lt5kvQxV76dAm92pwOa9uDj3g8iCEIgjf2ow4cUo=";
+    toolPng = materialIcon "png/action/build/materialicons/48dp/1x/baseline_build_black_48dp.png" "sha256-JpQzv21pSKk6tqV6c861kwhwIjBGBSz//gHuyjcyfT4=";
   };
 in
 stdenv.mkDerivation (finalAttrs: {
@@ -103,7 +105,6 @@ stdenv.mkDerivation (finalAttrs: {
     makeWrapper
     pkg-config
     python3
-    unzip
     autoPatchelfHook
   ];
 
@@ -124,13 +125,6 @@ stdenv.mkDerivation (finalAttrs: {
     substituteInPlace src/config.bzl \
       --replace-fail 'LINUX_MOZC_SERVER_DIR = "/usr/lib/mozc"' "LINUX_MOZC_SERVER_DIR = \"''$out/lib/mozc\"" \
       --replace-fail 'LINUX_MOZC_ICONS_DIR = "/usr/share/icons/mozc"' "LINUX_MOZC_ICONS_DIR = \"''$out/share/icons/mozc\""
-
-    # The material design icons share their file name and can therefore not
-    # be served from the distdir.
-    substituteInPlace src/MODULE.bazel \
-      --replace-fail '"https://raw.githubusercontent.com/google/material-design-icons/4.0.0/src/action/chrome_reader_mode/materialiconsoutlined/24px.svg"' '"file://${materialIcons.dictionary}"' \
-      --replace-fail '"https://raw.githubusercontent.com/google/material-design-icons/4.0.0/src/action/settings/materialiconsround/24px.svg"' '"file://${materialIcons.properties}"' \
-      --replace-fail '"https://raw.githubusercontent.com/google/material-design-icons/4.0.0/src/action/build/materialicons/24px.svg"' '"file://${materialIcons.tool}"'
   '';
 
   preConfigure = ''
@@ -191,7 +185,6 @@ stdenv.mkDerivation (finalAttrs: {
       unix/fcitx5:fcitx5-mozc.so \
       server:mozc_server \
       gui/tool:mozc_tool \
-      unix:icons \
       ${lib.optionalString withZenz "zenz_scorer:mozc_zenz_scorer"}
 
     runHook postBuild
@@ -238,27 +231,41 @@ stdenv.mkDerivation (finalAttrs: {
         "$out/share/locale/$lang/LC_MESSAGES/fcitx5-mozc.mo"
     done
 
-    # Icons.
-    mkdir -p icons
-    ${unzip}/bin/unzip -o bazel-bin/unix/icons.zip -d icons
-    install -Dm444 icons/mozc.png \
+    # Icons.  Upstream packs them with a Python helper that cannot run
+    # inside the Bazel sandbox (its interpreter is /usr/bin/env), so they are
+    # installed from the source tree instead.
+    install -Dm444 data/images/product_icon_32bpp-128.png \
       $out/share/icons/hicolor/128x128/apps/org.fcitx.Fcitx5.fcitx_mozc.png
     ln -s org.fcitx.Fcitx5.fcitx_mozc.png \
       $out/share/icons/hicolor/128x128/apps/fcitx_mozc.png
-    for svg in alpha_full.svg alpha_half.svg direct.svg hiragana.svg \
-      katakana_full.svg katakana_half.svg; do
-      install -Dm444 "icons/$svg" \
-        "$out/share/icons/hicolor/scalable/apps/fcitx_mozc_$svg"
+    install -Dm444 data/images/full_ascii.svg \
+      $out/share/icons/hicolor/scalable/apps/fcitx_mozc_alpha_full.svg
+    install -Dm444 data/images/full_katakana.svg \
+      $out/share/icons/hicolor/scalable/apps/fcitx_mozc_katakana_full.svg
+    install -Dm444 data/images/half_ascii.svg \
+      $out/share/icons/hicolor/scalable/apps/fcitx_mozc_alpha_half.svg
+    install -Dm444 data/images/half_katakana.svg \
+      $out/share/icons/hicolor/scalable/apps/fcitx_mozc_katakana_half.svg
+    install -Dm444 data/images/hiragana.svg \
+      $out/share/icons/hicolor/scalable/apps/fcitx_mozc_hiragana.svg
+    install -Dm444 data/images/direct.svg \
+      $out/share/icons/hicolor/scalable/apps/fcitx_mozc_direct.svg
+    install -Dm444 ${materialIcons.dictionarySvg} \
+      $out/share/icons/hicolor/scalable/apps/fcitx_mozc_dictionary.svg
+    install -Dm444 ${materialIcons.propertiesSvg} \
+      $out/share/icons/hicolor/scalable/apps/fcitx_mozc_properties.svg
+    install -Dm444 ${materialIcons.toolSvg} \
+      $out/share/icons/hicolor/scalable/apps/fcitx_mozc_tool.svg
+    for png in alpha_full alpha_half direct hiragana katakana_full katakana_half; do
+      install -Dm444 "data/images/unix/48x48/$png.png" \
+        "$out/share/icons/hicolor/48x48/apps/fcitx_mozc_$png.png"
     done
-    for svg in dictionary.svg properties.svg tool.svg; do
-      install -Dm444 "icons/outlined/$svg" \
-        "$out/share/icons/hicolor/scalable/apps/fcitx_mozc_$svg"
-    done
-    for png in alpha_full.png alpha_half.png direct.png hiragana.png \
-      katakana_full.png katakana_half.png; do
-      install -Dm444 "icons/$png" \
-        "$out/share/icons/hicolor/48x48/apps/fcitx_mozc_$png"
-    done
+    install -Dm444 ${materialIcons.dictionaryPng} \
+      $out/share/icons/hicolor/48x48/apps/fcitx_mozc_dictionary.png
+    install -Dm444 ${materialIcons.propertiesPng} \
+      $out/share/icons/hicolor/48x48/apps/fcitx_mozc_properties.png
+    install -Dm444 ${materialIcons.toolPng} \
+      $out/share/icons/hicolor/48x48/apps/fcitx_mozc_tool.png
 
     runHook postInstall
   '';
