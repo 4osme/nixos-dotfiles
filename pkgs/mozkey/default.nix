@@ -21,6 +21,7 @@
   python3,
   gettext,
   gnutar,
+  makeWrapper,
   unzip,
   autoPatchelfHook,
   fcitx5,
