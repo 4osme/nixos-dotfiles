@@ -111,7 +111,7 @@ stdenv.mkDerivation (finalAttrs: {
     fcitx5
     qt6.qtbase
   ]
-  ++ lib.optional withZenz [ llama-cpp ];
+  ++ lib.optionals withZenz [ llama-cpp ];
 
   patches = [ ./patches/0001-qt6-uic-reject-leading-namespace.patch ];
 
@@ -122,8 +122,8 @@ stdenv.mkDerivation (finalAttrs: {
     # The addon and the server find each other in a fixed directory, so point
     # it at the package output.
     substituteInPlace src/config.bzl \
-      --replace-fail 'LINUX_MOZC_SERVER_DIR = "/usr/lib/mozc"' 'LINUX_MOZC_SERVER_DIR = "''$out/lib/mozc"' \
-      --replace-fail 'LINUX_MOZC_ICONS_DIR = "/usr/share/icons/mozc"' 'LINUX_MOZC_ICONS_DIR = "''$out/share/icons/mozc"'
+      --replace-fail 'LINUX_MOZC_SERVER_DIR = "/usr/lib/mozc"' "LINUX_MOZC_SERVER_DIR = \"''$out/lib/mozc\"" \
+      --replace-fail 'LINUX_MOZC_ICONS_DIR = "/usr/share/icons/mozc"' "LINUX_MOZC_ICONS_DIR = \"''$out/share/icons/mozc\""
 
     # The material design icons share their file name and can therefore not
     # be served from the distdir.
@@ -134,6 +134,9 @@ stdenv.mkDerivation (finalAttrs: {
   '';
 
   preConfigure = ''
+    # The Bazel workspace is the src/ directory of the upstream checkout.
+    cd src
+
     # The pinned Bazel Central Registry is the Bzlmod registry.
     mkdir -p bcr
     ${gnutar}/bin/tar xf ${bcr} --strip-components=1 -C bcr
@@ -200,9 +203,9 @@ stdenv.mkDerivation (finalAttrs: {
     # The Fcitx 5 addon.
     install -Dm555 bazel-bin/unix/fcitx5/fcitx5-mozc.so \
       $out/lib/fcitx5/fcitx5-mozc.so
-    install -Dm444 src/unix/fcitx5/mozc-addon.conf \
+    install -Dm444 unix/fcitx5/mozc-addon.conf \
       $out/share/fcitx5/addon/mozc.conf
-    install -Dm444 src/unix/fcitx5/mozc.conf \
+    install -Dm444 unix/fcitx5/mozc.conf \
       $out/share/fcitx5/inputmethod/mozc.conf
 
     # The engine and the settings tool.
@@ -211,7 +214,7 @@ stdenv.mkDerivation (finalAttrs: {
     # The tool is a Qt application and lives next to the server, so the Qt
     # plugin path has to be set by hand.
     wrapProgram $out/lib/mozc/mozc_tool \
-      --prefix QT_PLUGIN_PATH : ${qt6.qtbase.qtPluginPrefix}
+      --prefix QT_PLUGIN_PATH : ${qt6.qtbase}/${qt6.qtbase.qtPluginPrefix}
 
     ${lib.optionalString withZenz ''
       # The local Zenz correction runs a llama.cpp server next to the scorer.
@@ -223,12 +226,12 @@ stdenv.mkDerivation (finalAttrs: {
       # rejects, so its metadata has to be normalised first.
       mkdir -p $out/lib/mozc/models
       ${python3}/bin/python3 ${./normalize-zenz-gguf.py} \
-        src/win32/installer/zenz_runtime/models/zenz-v3.2-small-Q5_K_M.gguf \
+        win32/installer/zenz_runtime/models/zenz-v3.2-small-Q5_K_M.gguf \
         $out/lib/mozc/models/zenz-v3.2-small-Q5_K_M.gguf
     ''}
 
     # Translations.
-    for pofile in src/unix/fcitx5/po/*.po; do
+    for pofile in unix/fcitx5/po/*.po; do
       lang=$(basename "$pofile" .po)
       msgfmt "$pofile" -o "$lang.mo"
       install -Dm444 "$lang.mo" \
