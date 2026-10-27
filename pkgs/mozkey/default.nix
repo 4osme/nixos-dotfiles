@@ -92,6 +92,10 @@ stdenv.mkDerivation (finalAttrs: {
 
   sourceRoot = "fcitx-mozkey-${rev}";
 
+  # The Qt application (mozc_tool) is wrapped by hand because it lives next
+  # to the engine instead of in $out/bin.
+  dontWrapQtApps = true;
+
   nativeBuildInputs = [
     bazel_9
     gettext
