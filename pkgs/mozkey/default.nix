@@ -40,7 +40,7 @@ let
 
   bcr = fetchurl {
     url = "https://github.com/bazelbuild/bazel-central-registry/archive/${bcrRev}.tar.gz";
-    hash = "sha256-82b4cc4f66e28d2ef81aeb862b164f7b0ff511555bdccd0d98cb019243ba65b9";
+    hash = "sha256-grTMT2bijS74GuuGKxZPew/1EVVb3M0NmMsBkkO6Zbk=";
   };
 
   # The archives Bazel downloads while building Mozkey: the Bzlmod modules,
@@ -76,9 +76,9 @@ let
     };
 
   materialIcons = {
-    dictionary = materialIcon "chrome_reader_mode/materialiconsoutlined/24px.svg" "sha256-a4c7b9bfb442a7497b72d74358c31034c4fef1ab2a50659834784580751ac04d";
-    properties = materialIcon "settings/materialiconsround/24px.svg" "sha256-9b01b133be1caffc680f132d385d0e594262d6cfd29759a63c428050b83fe628";
-    tool = materialIcon "build/materialicons/24px.svg" "sha256-df34fba3d09778db69503a23b688761051dbf65b5bccb0d7b729c69ff61c3804";
+    dictionary = materialIcon "chrome_reader_mode/materialiconsoutlined/24px.svg" "sha256-pMe5v7RCp0l7ctdDWMMQNMT+8asqUGWYNHhFgHUawE0=";
+    properties = materialIcon "settings/materialiconsround/24px.svg" "sha256-mwGxM74cr/xoDxMtOF0OWUJi1s/Sl1mmPEKAULg/5ig=";
+    tool = materialIcon "build/materialicons/24px.svg" "sha256-3zT7o9CXeNtpUDojtoh2EFHb9ltbzLDXtynGn/YcOAQ=";
   };
 in
 stdenv.mkDerivation (finalAttrs: {
@@ -87,7 +87,7 @@ stdenv.mkDerivation (finalAttrs: {
 
   src = fetchurl {
     url = "https://github.com/Masterisk-F/fcitx-mozkey/archive/${rev}.tar.gz";
-    hash = "sha256-f268df9fd22f3d5ee524686ceda4a87455895b5e41ef06d9de7c7f1b91aa811d";
+    hash = "sha256-8mjfn9IvPV7lJGhs7aSodFWJW15B7wbZ3nx/G5GqgR0=";
   };
 
   sourceRoot = "fcitx-mozkey-${rev}";
