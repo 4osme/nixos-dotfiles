@@ -48,6 +48,11 @@ hl.monitor({ output = "HDMI-A-1", mode = "3840x2160@60", position = "648x0", sca
 local sunshineRuntime = os.getenv("XDG_RUNTIME_DIR") or "/run/user/1000"
 local sunshineProfile = io.open(sunshineRuntime .. "/sunshine-hypr-display/1080p.active", "r")
 local sunshineNative = io.open(sunshineRuntime .. "/sunshine-hypr-display/native.active", "r")
+-- Session scope marker (written by `sunshine-session start`). While it exists
+-- the physical outputs stay disabled, no matter whether a client is
+-- connected: rendering to the 4K panel costs GPU/CPU and makes the stream
+-- heavier.
+local sunshineSession = io.open(sunshineRuntime .. "/sunshine-hypr-display/session.active", "r")
 
 -- capture/output_name in the (unmanaged) Sunshine config are written by
 -- `sunshine-session`. Read them so the streaming layout follows output_name
@@ -98,13 +103,21 @@ elseif sunshineNative then
     -- (single monitor at 0x0 means the raw KMS offsets are already correct).
     applySunshineLayout("preferred")
 else
-    -- Sunshine is running but no client session is active: keep the virtual
-    -- output alive (Sunshine's encoder probe needs a live output) and park it
-    -- far to the right so monitors.lua keeps the physical layout. This also
-    -- catches a HEADLESS-* output left behind by a crashed session.
-    local output = sunshineConfig("output_name") or "HEADLESS-1"
-    if output:find("^HEADLESS%-") then
-        hl.monitor({ output = output, mode = "1920x1080@60", position = "10000x0", scale = 1.0, transform = 0 })
+    -- Session scope: Sunshine captures the virtual output, so the physical
+    -- outputs stay disabled (the 4K panel would cost GPU/CPU and make the
+    -- stream heavier). A client connect/disconnect must not bring them back.
+    if sunshineSession then
+        sunshineSession:close()
+        applySunshineLayout("preferred")
+    else
+        -- No session and no client: keep the virtual output alive (Sunshine's
+        -- encoder probe needs a live output) and park it far to the right so
+        -- monitors.lua keeps the physical layout. This also catches a
+        -- HEADLESS-* output left behind by a crashed session.
+        local output = sunshineConfig("output_name") or "HEADLESS-1"
+        if output:find("^HEADLESS%-") then
+            hl.monitor({ output = output, mode = "1920x1080@60", position = "10000x0", scale = 1.0, transform = 0 })
+        end
     end
 end
 
@@ -116,3 +129,21 @@ hl.on("hyprland.start", function()
 end)
 -- Start it on a reload of an already running session as well.
 hl.exec_cmd(sunshineDisplayWatcher)
+
+-- HDMI-A-1 (4K / ASUS VA32U) watchdog: 入力ソース切替・HPD切断・復帰後に
+-- リンクが落ちることがあるため、DRM/Hyprland/DDCを監視して自動で再同期する。
+-- ログ: ~/.local/state/hdmi-watchdog.log / 状態: hdmi_watchdog.py --status
+-- スクリプト側で flock しているので、reload で重複起動しても1個だけ残る。
+-- 2026-10-27: 復帰判定を 2 点に絞った。
+--   1) DDC ポーリングはコンポーザーが output を on にしている間だけ。寝ている
+--      モニターへの DDC アクセスは起こ anderem、 read が失敗してまた寝る。
+--   2) 「output が disabled なら復帰」は restore-pending マーカーがあるとき
+--      だけ（= ストリーミングプロファイルで無効化したもの）。ユーザーが自分で
+--      無効化した output は触らない。
+-- 3) モニターが DDC に応答しない（眠っている）ときは dpms_on() をスキップ
+--    し、入力サイクル（確実に起こせる手段）へ直行する。
+local hdmiWatchdog = 'python3 "$HOME/.config/hypr/scripts/hdmi_watchdog.py"'
+hl.on("hyprland.start", function()
+    hl.exec_cmd(hdmiWatchdog)
+end)
+hl.exec_cmd(hdmiWatchdog)
