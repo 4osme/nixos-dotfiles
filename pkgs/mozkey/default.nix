@@ -8,7 +8,9 @@
 #     keeps the module resolution reproducible and offline,
 #   * every archive Bazel would download is prefetched by Nix and handed over
 #     through --distdir,
-#   * MODULE.bazel.lock pins the resolved module graph.
+#   * MODULE.bazel.lock pins the resolved module graph,
+#   * rules_python is patched, because its Python tools cannot run with the
+#     interpreters they expect inside the Nix sandbox.
 #
 # The Bazel build itself therefore never touches the network.
 {
@@ -62,6 +64,32 @@ let
     ${lib.concatMapStrings (archive: ''
       ln -s ${archive.path} $out/${archive.name}
     '') fetchedArchives}
+  '';
+
+  # rules_python writes a "/usr/bin/env python3" shebang into the stubs of
+  # its Python tools, and that interpreter does not exist in the Nix sandbox.
+  # The stubs also re-execute the standalone CPython, whose loader is not
+  # available either.  Patch the module to use the Python interpreter of the
+  # build instead.
+  rulesPython = fetchurl {
+    url = "https://github.com/bazel-contrib/rules_python/releases/download/1.9.0/rules_python-1.9.0.tar.gz";
+    hash = "sha256-CYuhNXjnlsAMhTohYfOCZH8y65p3CZ4ciLxSmTM9DW4=";
+  };
+
+  patchedRulesPython = runCommand "rules-python-patched" { } ''
+    mkdir -p $out
+    ${gnutar}/bin/tar xf ${rulesPython} -C $out --strip-components=1
+    # the registry patches the module version, do the same
+    substituteInPlace $out/MODULE.bazel \
+      --replace-fail 'version = "0.0.0"' 'version = "1.9.0"'
+    substituteInPlace $out/python/private/py_runtime_info.bzl \
+      --replace-fail 'DEFAULT_STUB_SHEBANG = "#!/usr/bin/env python3"' \
+        'DEFAULT_STUB_SHEBANG = "#!${python3}/bin/python3"'
+    # the stub re-executes the interpreter of the toolchain, use the one that
+    # runs the stub
+    substituteInPlace $out/python/private/python_bootstrap_template.txt \
+      --replace-fail 'program = python_program = FindPythonBinary(module_space)' \
+        'program = python_program = sys.executable'
   '';
 
   # The material design icons are fetched separately: three of them share
@@ -176,12 +204,14 @@ stdenv.mkDerivation (finalAttrs: {
       "''${host_copts[@]}" \
       "''${linkopts[@]}" \
       "''${host_linkopts[@]}" \
+      --jobs="$NIX_BUILD_CORES" \
       --config oss_linux \
       --compilation_mode opt \
       --copt=-fPIC \
       --define server=1 \
       --registry="file://$PWD/bcr" \
       --distdir=${distdir} \
+      --override_module=rules_python=${patchedRulesPython} \
       unix/fcitx5:fcitx5-mozc.so \
       server:mozc_server \
       gui/tool:mozc_tool \
