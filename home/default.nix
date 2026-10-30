@@ -37,8 +37,8 @@
     enableDynamicTheming = true;
   };
 
-  # dgop backs the system-monitoring widgets; DMS calls it from PATH.
-  programs.dux-calendar.systemd.enable = true;
+  # dcal.service starts with the graphical session.
+  programs.dank-calendar.systemd.enable = true;
 
   programs.dsearch.enable = true;
 
