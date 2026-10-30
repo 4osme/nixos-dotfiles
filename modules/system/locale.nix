@@ -1,4 +1,4 @@
-# Japanese desktop: locale, keymap, fcitx5 (the mozkey IbG engine) and the
+# Japanese desktop: locale, keymap, fcitx5 (the mozkey engine) and the
 # environment variables the session expects.
 { pkgs, lib, ... }:
 {
@@ -23,9 +23,9 @@
     enable = true;
     type = "fcitx5";
     fcitx5 = {
-      # mozkey IbG (the engine in ~/.config/fcitx5/profile) is not in nixpkgs;
-      # pkgs/mozkey packages the upstream prebuilt release.
-      addons = [ pkgs.fcitx5-mozkey-ibg ];
+      # mozkey (the engine in ~/.config/fcitx5/profile) is not in nixpkgs;
+      # pkgs/mozkey builds Masterisk-F/fcitx-mozkey from source.
+      addons = [ pkgs.fcitx5-mozkey ];
       # Keep the classic GTK/Qt immodule wiring the source config exports
       # (GTK_IM_MODULE=fcitx etc. in hyprland.lua) instead of the Wayland
       # frontend.
