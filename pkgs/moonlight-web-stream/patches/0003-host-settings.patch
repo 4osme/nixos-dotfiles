@@ -266,22 +266,12 @@ index 7a63d5d..099c728 100644
          // Sidebar
          this.sidebarHeader.innerText = i.sidebar
          this.divElement.appendChild(this.sidebarHeader)
-@@ -457,18 +529,17 @@
+@@ -457,18 +529,15 @@
  
          // Data Transport
-         const allowedDataTransport = [
+-        const allowedDataTransport = [
 -            { value: "auto", name: i.auto },
-+        // Only offer transports the role's permissions allow, and keep the
-+        // currently active preference (saved settings / URL override) selected.
-+        const allowedDataTransport = [
-+            ...(this.permissions.allow_transport_webrtc ? [{ value: "webrtc", name: "WebRTC" }] : []),
-+            ...(this.permissions.allow_transport_websockets ? [{ value: "websocket", name: i.webSocket }] : []),
-+        ]
-+        const preferredDataTransport = settings?.dataTransport
-+        const dataTransportValue = allowedDataTransport.some(o => o.value === preferredDataTransport)
-+            ? preferredDataTransport
-+            : "websocket"
-         ]
+-        ]
 -        if (this.permissions.allow_transport_webrtc) {
 -            allowedDataTransport.push(
 -                { value: "webrtc", name: "WebRTC" },
@@ -292,10 +282,20 @@ index 7a63d5d..099c728 100644
 -                { value: "websocket", name: i.webSocket },
 -            )
 -        }
++        // Only offer transports the role's permissions allow, and keep the
++        // currently active preference (saved settings / URL override) selected.
++        const allowedDataTransport = [
++            ...(this.permissions.allow_transport_webrtc ? [{ value: "webrtc", name: "WebRTC" }] : []),
++            ...(this.permissions.allow_transport_websockets ? [{ value: "websocket", name: i.webSocket }] : []),
++        ]
++        const preferredDataTransport = settings?.dataTransport
++        const dataTransportValue = allowedDataTransport.some(o => o.value === preferredDataTransport)
++            ? preferredDataTransport
++            : "websocket"
  
          this.language = new SelectComponent("language", getLanguageOptions(), {
              displayName: i.language,
-@@ -479,7 +550,7 @@
+@@ -479,7 +548,7 @@
  
          this.dataTransport = new SelectComponent("transport", allowedDataTransport, {
              displayName: i.dataTransport,
@@ -304,7 +304,7 @@ index 7a63d5d..099c728 100644
          })
          this.dataTransport.addChangeListener(this.onSettingsChange.bind(this))
          this.dataTransport.mount(this.divElement)
-@@ -537,6 +608,27 @@
+@@ -537,6 +606,27 @@
          this.divElement.removeEventListener("ml-settingschange", listener as any)
      }
  
