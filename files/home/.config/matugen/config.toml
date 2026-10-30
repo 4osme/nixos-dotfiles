@@ -1,0 +1,9 @@
+# Extra matugen templates run alongside the ones Dux Shell ships — executed
+# by DMS on every wallpaper change / theme switch. Paths must be absolute.
+[config]
+
+# Ghostty's native GTK UI (native tab bar): ~/.config/ghostty/gtk.css is NOT
+# Home Manager-managed — matugen owns it, so the design lives in the template.
+[templates.ghosttygtk]
+input_path = '/home/underdone/.config/matugen/templates/ghostty-gtk.css'
+output_path = '/home/underdone/.config/ghostty/gtk.css'

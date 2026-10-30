@@ -6,8 +6,7 @@
 {
   programs.hyprland = {
     enable = true;
-    # `uwsm app` is how the quickshell launcher starts applications
-    # (~/.config/quickshell/ii/modules/launcher/Launcher.qml).
+    # `uwsm app` is how the Dux Shell launcher starts applications.
     withUWSM = true;
     xwayland.enable = true;
   };
