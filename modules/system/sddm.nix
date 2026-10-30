@@ -31,8 +31,8 @@ in
     ];
   };
 
-  # The Hyprland session from programs.hyprland; with UWSM the launcher
-  # (quickshell) can spawn apps through `uwsm app` like the source install.
+  # The Hyprland session from programs.hyprland; with UWSM the Dux Shell
+  # launcher can spawn apps through `uwsm app` like the source install.
   services.displayManager.defaultSession = "hyprland-uwsm";
 
   security.pam.services.sddm.text = ''

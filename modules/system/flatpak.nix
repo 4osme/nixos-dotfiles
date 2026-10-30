@@ -1,4 +1,4 @@
-# Flatpak support (the source host manages system flatpaks; the quickshell
+# Flatpak support (the source host manages system flatpaks; the Dux Shell
 # launcher has a Flatpak source chip). 26.05's services.flatpak only takes
 # enable/package, so the preinstalled apps (recipe-common-dotfiles.yml
 # default-flatpaks) are installed by a small one-shot service instead.

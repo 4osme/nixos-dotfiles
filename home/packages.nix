@@ -1,7 +1,3 @@
-# The AGENTS.md tool list + the GUI components the hyprtomic-gui container
-# carried (quickshell shell, hyprbind, hypremoji, clipse, …). Qt/Kvantum
-# theming stays on the shipped dotfiles (apply-theme.sh edits the same files),
-# so do not enable the Home Manager qt/gtk modules here.
 { pkgs, inputs, ... }:
 {
   home.packages = with pkgs; [
@@ -13,7 +9,6 @@
     vscode
     vesktop # fallback until the NixOS migration is finished
     inputs.serein.packages.${pkgs.stdenv.hostPlatform.system}.default
-    mission-center
     bitwarden-desktop
     google-chrome
     easyeffects
@@ -22,26 +17,20 @@
     ghostty
     zsh
 
-    # --- desktop shell / GUI components (hyprtomic-gui) ---
-    quickshell
+    # --- Dux utils (modules are enabled in home/default.nix). dgop backs the
+    # DMS system-monitoring widgets via PATH. ---
+    inputs.dgop.packages.${pkgs.stdenv.hostPlatform.system}.default
+
+    # --- desktop shell / GUI components ---
     hyprbind
     hypremoji
-    resolve-icons # GTK icon resolver wrapper for the quickshell launcher
-    clipse
-    rofi
+    rofi # window switcher (Dux Shell has no Hyprland alt-tab)
+    satty # screenshot annotation (pipe: `dms screenshot --stdout | satty -f -`)
+    adw-gtk3 # Dux Shell "Apply GTK Themes" prerequisite
     nwg-displays
     haruna
-    sigma-file-manager # default file manager (nemo dropped, AGENTS.md)
-    file-roller
     pavucontrol
-    wl-clipboard
-    cliphist
-    grim
-    slurp
-    hyprpicker
-    hyprsunset
-    brightnessctl
-    playerctl
+    wl-clipboard # hypremoji などが使用
     libnotify
     dex
     wtype
@@ -49,25 +38,22 @@
     jq
     python3 # ~/.config/sunshine/hypr-stream-display.py (main-desktop)
 
-    # Icon themes / cursors named by the configs (gtk settings.ini, qt6ct,
-    # dconf icon-theme).
+    # Icon themes / cursors available to Dux Shell icon/cursor theming.
     papirus-icon-theme
     tela-circle-icon-theme
     bibata-cursors
 
-    # Qt theme tools (the configs in ~/.config/qt{5,6}ct + Kvantum are synced;
-    # these are the binaries apply-theme.sh / the settings.ini expect).
+    # Qt theming goes through qt5ct/qt6ct (Dux Shell generates their color
+    # files); Kvantum and the old md3-amethyst palettes are gone.
     qt6Packages.qt6ct
     libsForQt5.qt5ct
-    qt6Packages.qtstyleplugin-kvantum
-    libsForQt5.qtstyleplugin-kvantum
 
-    # gsettings/dconf CLI for apply-icon-theme.sh and the shell scripts.
+    # gsettings/dconf CLI used by the session scripts and Dux Shell.
     glib
     dconf
     gsettings-desktop-schemas
 
-    # xdg helpers the session relies on (nemo/xdg-open, mime handlers).
+    # xdg helpers the session relies on (xdg-open, mime handlers).
     xdg-utils
     desktop-file-utils
     shared-mime-info

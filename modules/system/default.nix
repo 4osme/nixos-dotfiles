@@ -23,7 +23,7 @@
     ./hardware.nix
   ];
 
-  # The custom packages (hyprbind, quickshell patch, mozkey, Vypr, …).
+  # The custom packages (hyprbind, mozkey, Vypr, …).
   nixpkgs.overlays = [ (import ../../overlays) ];
 
   # TODO(manual): bump once at install; never change afterwards (see the

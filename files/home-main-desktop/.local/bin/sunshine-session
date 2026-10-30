@@ -28,7 +28,14 @@ CONFIG = Path.home() / ".config/sunshine/sunshine.conf"
 HELPER = Path.home() / ".config/sunshine/hypr-stream-display.py"
 HEADLESS = "HEADLESS-1"
 HEADLESS_PREFIX = "HEADLESS-"
-MARKERS = ("1080p.active", "native.active", "state.json")
+MARKERS = ("1080p.active", "native.active", "restore-pending", "state.json")
+# Session scope marker: while it exists the physical outputs stay disabled for
+# the whole session. A client connect/disconnect must not bring the 4K panel
+# back, that makes the stream heavier.
+SESSION_MARKER = STATE_DIR / "session.active"
+# The physical outputs that were on when the session started. They have to be
+# restored when it ends.
+PHYSICAL_STATE = STATE_DIR / "physical.json"
 
 
 def log(message):
@@ -126,6 +133,39 @@ def tunnel(action, check=True):
 def clear_state():
     for name in MARKERS:
         (STATE_DIR / name).unlink(missing_ok=True)
+    SESSION_MARKER.unlink(missing_ok=True)
+    (STATE_DIR / "restore-pending").unlink(missing_ok=True)
+
+
+def physical_outputs(env):
+    """The physical outputs that are on right now.
+
+    The session disables them, so they have to be remembered to be restored
+    when the session ends. Outputs that are already disabled stay disabled:
+    the user may have turned them off on purpose.
+    """
+    outputs = []
+    for item in monitors(env):
+        name = item.get("name", "")
+        if not name.startswith("HDMI-") or item.get("disabled"):
+            continue
+        outputs.append({
+            "output": name,
+            "mode": "%sx%s@%s" % (item.get("width"), item.get("height"),
+                                   item.get("refreshRate")),
+            "position": "%sx%s" % (item.get("x"), item.get("y")),
+            "scale": item.get("scale", 1.0),
+            "transform": item.get("transform", 0),
+        })
+    return outputs
+
+
+def outputs_restored(outputs, env):
+    """True when every remembered output is enabled again."""
+    if not outputs:
+        return True
+    disabled = {item.get("name") for item in monitors(env) if item.get("disabled")}
+    return not any(item["output"] in disabled for item in outputs)
 
 
 def start(with_tunnel=False):
@@ -133,16 +173,25 @@ def start(with_tunnel=False):
     name = ensure_headless(env)
     set_config("capture", "wlr")
     set_config("output_name", name)
-    # Park the virtual output first (host.lua's idle branch), so Sunshine's
-    # encoder probe sees a live monitor and the physical screens stay on while
-    # the service starts. hypr-stream-display.py then applies the stream
-    # profile immediately.
+    # Remember the physical outputs and remember that they have to come back
+    # when the session ends.
+    outputs = physical_outputs(env)
+    PHYSICAL_STATE.write_text(json.dumps(outputs))
+    PHYSICAL_STATE.chmod(0o600)
+    # Session scope: the physical outputs stay disabled for the whole session.
+    # A client connect/disconnect must not bring the 4K panel back: rendering
+    # to it costs GPU/CPU and makes the stream heavier.
+    SESSION_MARKER.touch(mode=0o600)
+    # Apply the layout: the physical outputs are disabled and the virtual
+    # output is pinned to the origin.
     run("hyprctl", "reload", env=env)
     sunshine("restart")
-    subprocess.run([sys.executable, str(HELPER), "start"], env=env, check=True)
     if with_tunnel:
         tunnel("start")
-    log(f"started: Sunshine is capturing {name} (1920x1080@60); physical outputs disabled")
+    log(
+        f"started: Sunshine is capturing {name} (1920x1080@60); physical "
+        f"outputs disabled ({len(outputs)} remembered for the restore)"
+    )
     if with_tunnel:
         log("cloudflared-tunnel started")
 
@@ -150,11 +199,22 @@ def start(with_tunnel=False):
 def stop(with_tunnel=False):
     sunshine("stop", check=False)
     env = hypr_env()
-    if env:
-        subprocess.run(
-            [sys.executable, str(HELPER), "stop"], env=env, check=False
-        )
+    # Drop the session scope and the stale markers first: the reload restores
+    # the physical monitor layout.
     clear_state()
+    if env:
+        run("hyprctl", "reload", env=env)
+        # The reload re-applies the monitor rules, but an output that could not
+        # be brought up stays disabled. Hand the rest to the HDMI watchdog.
+        try:
+            outputs = json.loads(PHYSICAL_STATE.read_text())
+        except (OSError, json.JSONDecodeError):
+            outputs = []
+        if outputs and not outputs_restored(outputs, env):
+            (STATE_DIR / "restore-pending").write_text(json.dumps(outputs))
+            (STATE_DIR / "restore-pending").chmod(0o600)
+            log("physical outputs are still disabled; the HDMI watchdog will restore them")
+    PHYSICAL_STATE.unlink(missing_ok=True)
     if env:
         run("hyprctl", "reload", env=env)
         remove_headless(env)
