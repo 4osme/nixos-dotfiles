@@ -6,7 +6,7 @@ final: prev: {
   hypremoji = final.callPackage ../pkgs/hypremoji { };
   vypr = final.callPackage ../pkgs/vypr { };
   hyprtomic-vypr-scripts = final.callPackage ../pkgs/vypr/scripts.nix { };
-  fcitx5-mozkey-ibg = final.callPackage ../pkgs/mozkey { };
+  fcitx5-mozkey = final.callPackage ../pkgs/mozkey { };
   sddm-hyprtomic-theme = final.callPackage ../pkgs/sddm-theme { };
   google-sans-flex = final.callPackage ../pkgs/google-sans-flex { };
   libfprint-cs9711 = final.callPackage ../pkgs/libfprint-cs9711 { };

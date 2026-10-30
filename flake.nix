@@ -125,7 +125,7 @@
           hypremoji
           vypr
           hyprtomic-vypr-scripts
-          fcitx5-mozkey-ibg
+          fcitx5-mozkey
           sddm-hyprtomic-theme
           google-sans-flex
           libfprint-cs9711
