@@ -1863,7 +1863,7 @@ index 5162a60..3b66340 100644
  
          // Stream Stats
          this.stats = new StreamStats(this.logger)
-@@ -161,25 +164,105 @@ export class Stream implements Component {
+@@ -161,25 +164,114 @@
      async startConnection() {
          this.debugLog(`Permissions: ${JSON.stringify(this.permissions)}`)
  
@@ -1884,16 +1884,25 @@ index 5162a60..3b66340 100644
 -        } else if (desiredTransport == "webrtc") {
 -            await this.tryWebRTCTransport()
 -        } else if (desiredTransport == "websocket") {
-+        // This deployment is reached exclusively through Cloudflare Tunnel.
-+        // Saved settings and URL overrides must not trigger a doomed ICE attempt
-+        // (and a host streaming session) before falling back after 15 seconds.
++        // Transport selection: default settings keep dataTransport = "websocket",
++        // so remote access through a Cloudflare tunnel behaves exactly as before
++        // (WebSocket-only, no doomed ICE attempt). Explicitly choosing
++        // "webrtc" enables the faster LAN path; when ICE cannot reach the
++        // host's UDP ports it times out after 15s and we fall back to WebSocket
++        // so the session still starts.
 +        const requestedTransport = this.transportOverride ?? this.settings.dataTransport
-+        if (requestedTransport != "websocket") {
-+            this.debugLog(`Ignoring transport preference ${requestedTransport}: this deployment uses WebSocket only`)
-+        }
-+        this.debugLog("Using transport: websocket")
++        this.debugLog(`Using transport: ${requestedTransport}`)
 +        this.stopVideoStallWatchdog()
-+        await this.tryWebSocketTransport()
++
++        if (requestedTransport == "webrtc") {
++            let shutdownReason = await this.tryWebRTCTransport()
++            if (shutdownReason == "failednoconnect") {
++                this.debugLog("WebRTC connection failed. Falling back to WebSocket transport.", { type: "informError" })
++                await this.tryWebSocketTransport()
++            }
++        } else {
++            await this.tryWebSocketTransport()
++        }
 +
 +        // A host that cannot handle the preferred codec (e.g. AV1 preference
 +        // against an H264-only host) may fail to start or die right after the
@@ -1981,7 +1990,7 @@ index 5162a60..3b66340 100644
      private transport: Transport | null = null
  
      private setTransport(transport: Transport) {
-@@ -196,7 +279,7 @@ export class Stream implements Component {
+@@ -196,7 +288,7 @@
      }
  
      private async createTransportOptions(): Promise<TransportOptions | null> {
@@ -1990,7 +1999,7 @@ index 5162a60..3b66340 100644
  
          const dataCodecs = await this.queryVideoCodecs("data")
  
-@@ -293,6 +376,8 @@ export class Stream implements Component {
+@@ -293,6 +385,8 @@
          }
  
          // -- Connection successful
@@ -1999,7 +2008,7 @@ index 5162a60..3b66340 100644
          await this.onConnect(connectData)
  
          return await onClose
-@@ -340,6 +425,8 @@ export class Stream implements Component {
+@@ -340,6 +434,8 @@
          }
  
          // -- Connection successful
@@ -2008,7 +2017,7 @@ index 5162a60..3b66340 100644
          this.onConnect(connectData)
  
          return await onClose
-@@ -405,7 +492,7 @@ export class Stream implements Component {
+@@ -405,7 +501,7 @@
      }
  
      private async queryVideoCodecs(type: "videotrack" | "data"): Promise<VideoFormats> {
