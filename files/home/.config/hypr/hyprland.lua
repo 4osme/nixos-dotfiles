@@ -7,9 +7,8 @@
 -- 設定はすべて Home Manager 管理 (NixOS): このファイル・theme.lua・
 -- monitors.lua・workspaces.lua・host.lua は Nix store からのリンク。
 -- マシン固有・個人用の追加 (workspace 割当・quadgrid・Sunshine 等) は
--- host.lua (host overlay) に置く。テーマは md3-amethyst 固定
--- (apply-theme.sh は廃止; Theme.qml のパラメータテーブル = Alchemist が唯一の
--- 定義で、対応する静的ファイルは files/home 側にある)。
+-- host.lua (host overlay) に置く。テーマ (壁紙・GTK/Qt アプリ配色) は Dux
+-- Shell が管理する (壁紙を起点に matugen で生成)。
 -- デバッグ用: ~/.config/hypr/local.conf (管理外) は最後に読み込まれ、ここまでの
 -- 既定 (モニタ / ワークスペース / window rules / keybinds / env / 色) を
 -- 上書きできる。
@@ -30,8 +29,8 @@ hl.monitor({
 
 -- Variables
 local terminal    = "ghostty"
-local fileManager = "sigma-file-manager"
-local menu        = "qs -c ii ipc call launcher toggle"
+local fileManager = "dfiles"
+local menu        = "dms ipc call spotlight toggle"
 local mainMod     = "SUPER"
 
 local _HOME = os.getenv("HOME") or ""
@@ -80,28 +79,22 @@ hl.env("XMODIFIERS", "@im=fcitx")
 hl.env("INPUT_METHOD", "fcitx")
 
 -- Autostart
--- The bar / launcher / control-center / notifications / powermenu / OSD are
--- quickshell. On fedora-hyprtomic it ran inside the Arch GUI container; on
--- NixOS the shell, the IME (fcitx5) and the clipboard helpers run natively.
--- hyprpolkitagent, gnome-keyring and hypridle are systemd user services
+-- The bar / launcher / control-center / notifications / powermenu /
+-- clipboard / wallpaper / OSD are Dux Shell (dms.service, a systemd user
+-- service from programs.dank-material-shell) that starts with the graphical
+-- session. hyprlock, gnome-keyring and ydotoold are also user services
 -- (home/services.nix, programs.hyprlock) and start with the session.
 hl.on("hyprland.start", function()
     hl.exec_cmd("dbus-update-activation-environment --systemd --all")
     hl.exec_cmd("systemctl --user import-environment QT_QPA_PLATFORMTHEME GTK_IM_MODULE QT_IM_MODULE XMODIFIERS")
     hl.exec_cmd("fcitx5 -d")
-    hl.exec_cmd("clipse -listen")
-    hl.exec_cmd("wl-paste --type text --watch bash -c 'cliphist store && qs -c ii ipc call cliphistService update'")
-    hl.exec_cmd("wl-paste --type image --watch bash -c 'cliphist store && qs -c ii ipc call cliphistService update'")
     -- XDG autostart: the Background portal writes a flatpak app's "start on
     -- login" entry to ~/.config/autostart; dex runs those entries (there is no
     -- gnome-session here). Only the user directory is scanned on purpose:
     -- /etc/xdg/autostart holds GNOME/XFCE applets that do not belong in this
     -- session.
     hl.exec_cmd('dex -a -e Hyprland -s "$HOME/.config/autostart"')
-    hl.exec_cmd("swaybg -i $HOME/.local/share/backgrounds/wallpaper.jpg -m fill")
     hl.exec_cmd("hyprctl setcursor Bibata-Modern-Classic 36")
-    -- The shell (quickshell, config "ii"). Blocks while the session runs.
-    hl.exec_cmd("qs -c ii")
     hl.exec_cmd("sleep 2 && dbus-update-activation-environment --systemd DISPLAY WAYLAND_DISPLAY XDG_CURRENT_DESKTOP")
 end)
 
@@ -209,10 +202,10 @@ hl.config({
     },
 })
 
--- Theme colors: static, managed by Home Manager
--- (files/home/.config/hypr/theme.lua — md3-amethyst, the Alchemist parameter
--- table in Theme.qml). Loaded when present; a debug override can still be put
--- into local.conf (loaded last).
+-- Theme (border colors): the md3-amethyst palette, now a Home Manager-managed
+-- static file instead of Theme.qml. Loaded when present; the Dux Shell
+-- fragment (~/.config/hypr/dms/colors.lua) loads later and wins when present,
+-- and a debug override still goes into local.conf (loaded last).
 local themeOk, themeColors = pcall(dofile, _HOME .. "/.config/hypr/theme.lua")
 if themeOk and type(themeColors) == "table" then
     hl.config({
@@ -292,7 +285,7 @@ hl.bind(mainMod .. " + L", hl.dsp.exec_cmd("hyprlock"), { desc = "画面ロッ�
 hl.bind(mainMod .. " + C", hl.dsp.exec_cmd("google-chrome-stable"), { desc = "Chrome を開く" })
 hl.bind(mainMod .. " + T", hl.dsp.exec_cmd("google-chrome-stable --profile-directory=Default --app-id=lodlkdfmihgonocnmddehnfgiljnadcf"), { desc = "X を開く (Chromeアプリ)" })
 hl.bind(mainMod .. " + D", hl.dsp.exec_cmd("vesktop"), { desc = "Vesktop を開く" })
-hl.bind(mainMod .. " + M", hl.dsp.exec_cmd("missioncenter"), { desc = "Mission Center (システムモニタ)" })
+hl.bind(mainMod .. " + M", hl.dsp.exec_cmd("dms ipc call processlist focusOrToggle"), { desc = "プロセスモニタ (DMS)" })
 hl.bind(mainMod .. " + B", hl.dsp.exec_cmd("bitwarden"), { desc = "Bitwarden を開く" })
 
 -- Focus
@@ -316,14 +309,14 @@ hl.bind(mainMod .. " + SHIFT + down",  moveWindowAction("down"),  { desc = "ウ�
 -- Utilities
 hl.bind(mainMod .. " + Escape", hl.dsp.exec_cmd("rofi -show window"), { desc = "ウィンドウスイッチャ (rofi)" })
 hl.bind(mainMod .. " + SHIFT + S",
-    hl.dsp.exec_cmd([[mkdir -p "$HOME/Pictures/Screenshots" && FILE="$HOME/Pictures/Screenshots/$(date +%Y-%m-%d_%H-%M-%S).png" && grim -g "$(slurp)" "$FILE" && wl-copy --type image/png < "$FILE"]]),
-    { desc = "領域スクリーンショットをコピーして保存" })
+    hl.dsp.exec_cmd('bash -c \'dms screenshot --stdout | satty -f - --copy-command wl-copy --save-after-copy --output-filename "$HOME/Pictures/Screenshots/satty-$(date +%Y%m%d-%H%M%S).png"\''),
+    { desc = "領域スクリーンショット → satty (注釈/保存/コピー)" })
 hl.bind(mainMod .. " + CTRL + SHIFT + S",
-    hl.dsp.exec_cmd([[mkdir -p "$HOME/Pictures/Screenshots" && grim -g "$(slurp)" "$HOME/Pictures/Screenshots/$(date +%Y-%m-%d_%H-%M-%S).png"]]),
-    { desc = "領域スクリーンショットを保存" })
-hl.bind(mainMod .. " + SHIFT + P", hl.dsp.exec_cmd("hyprpicker -a -f hex"), { desc = "カラーピッカー" })
-hl.bind(mainMod .. " + DELETE", hl.dsp.exec_cmd("qs -c ii ipc call powermenu toggle"), { desc = "電源メニュー" })
-hl.bind(mainMod .. " + A", hl.dsp.exec_cmd("qs -c ii ipc call controlcenter toggle"), { desc = "コントロールセンター" })
+    hl.dsp.exec_cmd('bash -c \'dms screenshot full --stdout | satty -f - --copy-command wl-copy --save-after-copy --output-filename "$HOME/Pictures/Screenshots/satty-$(date +%Y%m%d-%H%M%S).png"\''),
+    { desc = "全画面スクリーンショット → satty" })
+hl.bind(mainMod .. " + SHIFT + P", hl.dsp.exec_cmd("dms color pick -a"), { desc = "カラーピッカー (コピー)" })
+hl.bind(mainMod .. " + DELETE", hl.dsp.exec_cmd("dms ipc call powermenu toggle"), { desc = "電源メニュー (DMS)" })
+hl.bind(mainMod .. " + A", hl.dsp.exec_cmd("dms ipc call control-center toggle"), { desc = "コントロールセンター (DMS)" })
 
 -- Ghostty ネイティブタブを使用 (Ctrl+Shift+T/Q/←/→ は Ghostty が処理)
 
@@ -367,26 +360,26 @@ else
 end
 
 -- Locked bindings - work on lock screen
-hl.bind("XF86AudioRaiseVolume", hl.dsp.exec_cmd("wpctl set-volume -l 1 @DEFAULT_AUDIO_SINK@ 5%+"),
-    { locked = true, repeating = true, desc = "音量を上げる" })
-hl.bind("XF86AudioLowerVolume", hl.dsp.exec_cmd("wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-"),
-    { locked = true, repeating = true, desc = "音量を下げる" })
-hl.bind("XF86AudioMute", hl.dsp.exec_cmd("wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle"),
-    { locked = true, repeating = true, desc = "出力ミュート切り替え" })
-hl.bind("XF86AudioMicMute", hl.dsp.exec_cmd("wpctl set-mute @DEFAULT_AUDIO_SOURCE@ toggle"),
-    { locked = true, repeating = true, desc = "マイクミュート切り替え" })
-hl.bind("XF86MonBrightnessUp", hl.dsp.exec_cmd("~/.config/hypr/scripts/bright.sh 5%+"),
-    { locked = true, repeating = true, desc = "画面輝度を上げる" })
-hl.bind("XF86MonBrightnessDown", hl.dsp.exec_cmd("~/.config/hypr/scripts/bright.sh 5%-"),
-    { locked = true, repeating = true, desc = "画面輝度を下げる" })
+hl.bind("XF86AudioRaiseVolume", hl.dsp.exec_cmd("dms ipc call audio increment 5"),
+    { locked = true, repeating = true, desc = "音量を上げる (DMS)" })
+hl.bind("XF86AudioLowerVolume", hl.dsp.exec_cmd("dms ipc call audio decrement 5"),
+    { locked = true, repeating = true, desc = "音量を下げる (DMS)" })
+hl.bind("XF86AudioMute", hl.dsp.exec_cmd("dms ipc call audio mute"),
+    { locked = true, repeating = true, desc = "出力ミュート切り替え (DMS)" })
+hl.bind("XF86AudioMicMute", hl.dsp.exec_cmd("dms ipc call mic mute"),
+    { locked = true, repeating = true, desc = "マイクミュート切り替え (DMS)" })
+hl.bind("XF86MonBrightnessUp", hl.dsp.exec_cmd("dms ipc call brightness increment 5"),
+    { locked = true, repeating = true, desc = "画面輝度を上げる (DMS)" })
+hl.bind("XF86MonBrightnessDown", hl.dsp.exec_cmd("dms ipc call brightness decrement 5"),
+    { locked = true, repeating = true, desc = "画面輝度を下げる (DMS)" })
 
-hl.bind("XF86AudioNext",  hl.dsp.exec_cmd("playerctl next"),       { locked = true, desc = "次の曲" })
-hl.bind("XF86AudioPause", hl.dsp.exec_cmd("playerctl play-pause"), { locked = true, desc = "再生/一時停止" })
-hl.bind("XF86AudioPlay",  hl.dsp.exec_cmd("playerctl play-pause"), { locked = true, desc = "再生/一時停止" })
-hl.bind("XF86AudioPrev",  hl.dsp.exec_cmd("playerctl previous"),   { locked = true, desc = "前の曲" })
+hl.bind("XF86AudioNext",  hl.dsp.exec_cmd("dms ipc call mpris next"),     { locked = true, desc = "次の曲 (DMS)" })
+hl.bind("XF86AudioPause", hl.dsp.exec_cmd("dms ipc call mpris playPause"), { locked = true, desc = "再生/一時停止 (DMS)" })
+hl.bind("XF86AudioPlay",  hl.dsp.exec_cmd("dms ipc call mpris playPause"), { locked = true, desc = "再生/一時停止 (DMS)" })
+hl.bind("XF86AudioPrev",  hl.dsp.exec_cmd("dms ipc call mpris previous"), { locked = true, desc = "前の曲 (DMS)" })
 
 -- Regular bindings
-hl.bind(mainMod .. " + V",      hl.dsp.exec_cmd("clipse-gui"),  { desc = "クリップボード履歴" })
+hl.bind(mainMod .. " + V",      hl.dsp.exec_cmd("dms ipc call clipboard toggle"), { desc = "クリップボード履歴 (DMS)" })
 hl.bind(mainMod .. " + period", hl.dsp.exec_cmd("hypremoji"),   { desc = "絵文字ピッカー" })
 
 -- Window rules
@@ -421,7 +414,7 @@ hl.window_rule({
 
 hl.window_rule({
     name    = "float-pickers",
-    match   = { class = "^(dev\\.musagy\\.hypremoji|clipse-gui)$" },
+    match   = { class = "^(dev\\.musagy\\.hypremoji)$" },
     float   = true,
     center  = true,
     opacity = 0.9,
@@ -474,12 +467,10 @@ hl.window_rule({
 })
 
 hl.window_rule({
-    name    = "float-missioncenter",
-    match   = { class = "io.missioncenter.MissionCenter" },
-    float   = true,
-    size    = "(monitor_w*0.3) (monitor_h*0.35)",
-    center  = true,
-    opacity = 0.85,
+    name   = "float-dfiles-dialogs",
+    match  = { class = "^(dev\\.duxlabs\\.files)$", title = "^(Open|Save|Select|Upload|Export|Import)" },
+    float  = true,
+    center = true,
 })
 
 hl.window_rule({
@@ -528,14 +519,23 @@ hl.window_rule({
     no_blur      = true,
 })
 
--- Layer rules
-hl.layer_rule({ name = "powermenu",          match = { namespace = "quickshell:powermenu" },      blur = false, ignore_alpha = 0.5 })
-hl.layer_rule({ name = "controlcenter",      match = { namespace = "quickshell:controlcenter" },  blur = true,  ignore_alpha = 0.5 })
-hl.layer_rule({ name = "notifications",      match = { namespace = "quickshell:notifications" },  blur = false, ignore_alpha = 0.5 })
-hl.layer_rule({ name = "shelf",              match = { namespace = "quickshell:shelf" },          blur = true,  ignore_alpha = 0.5 })
-hl.layer_rule({ name = "launcher",           match = { namespace = "quickshell:launcher" },       blur = false, ignore_alpha = 0.5 })
-hl.layer_rule({ name = "volume-osd",         match = { namespace = "quickshell:volume-osd" },     blur = false, ignore_alpha = 0.5 })
-hl.layer_rule({ name = "rofi",               match = { namespace = "rofi" },                      blur = true,  ignore_alpha = 0.2 })
+-- Layer rules (Dux Shell namespaces, docs/dms/layers)
+hl.layer_rule({ name = "power-menu",      match = { namespace = "dms:power-menu" },         blur = false, ignore_alpha = 0.5 })
+hl.layer_rule({ name = "control-center",  match = { namespace = "dms:control-center" },     blur = true,  ignore_alpha = 0.5 })
+hl.layer_rule({ name = "notification",    match = { namespace = "dms:notification-popup" }, blur = false, ignore_alpha = 0.5 })
+hl.layer_rule({ name = "spotlight",       match = { namespace = "dms:spotlight" },          blur = false, ignore_alpha = 0.5 })
+hl.layer_rule({ name = "osd",             match = { namespace = "dms:osd" },                blur = false, ignore_alpha = 0.5 })
+hl.layer_rule({ name = "rofi",            match = { namespace = "rofi" },                   blur = true,  ignore_alpha = 0.2 })
+
+-- Dux Shell fragments (outputs / cursor / input / colors / windowrules /
+-- xray layout), written by DMS's Displays & theming UI (`~/.config/hypr/dms/`).
+-- Optional on purpose: the files appear after the first change made from DMS.
+for _, frag in ipairs({ "outputs", "cursor", "input", "colors", "windowrules", "layout" }) do
+    local path = _HOME .. "/.config/hypr/dms/" .. frag .. ".lua"
+    if _exists(path) then
+        pcall(dofile, path)
+    end
+end
 
 -- Host extras, Home Manager managed (files/home-<host>/.config/hypr/host.lua):
 -- workspace assignments, per-workspace layouts, streaming profiles.

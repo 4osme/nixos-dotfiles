@@ -1,6 +1,5 @@
-# dconf: just the profile/database plumbing on the system side. The actual
-# values are Home Manager's dconf.settings (home/theme.nix), so there is no
-# system database to maintain here anymore.
+# dconf: just the profile/database plumbing on the system side. GTK/Qt theme
+# values are written at runtime by Dux Shell's theming (matugen).
 { ... }:
 {
   programs.dconf.enable = true;

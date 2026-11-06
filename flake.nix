@@ -18,6 +18,29 @@
     # 1.98.1; our nixpkgs 26.05 ships Rust 1.95, which is too old, so keep this
     # input's nixpkgs un-followed. The package is self-contained.
     serein.url = "github:ViceVerse-cz/Serein";
+
+    # Dux Labs suite: Dux Shell (bar / launcher / control center / theming) and
+    # its utils. All follow our nixpkgs (they support 26.05 natively).
+    dms = {
+      url = "github:duxlabs-dev/dux-shell/stable";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+    dgop = {
+      url = "github:duxlabs-dev/dux-gop";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+    dsearch = {
+      url = "github:duxlabs-dev/dux-search";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+    dcal = {
+      url = "github:duxlabs-dev/dux-calendar";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+    dfiles = {
+      url = "github:duxlabs-dev/dux-files";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs =
@@ -106,8 +129,6 @@
           sddm-hyprtomic-theme
           google-sans-flex
           libfprint-cs9711
-          resolve-icons
-          sigma-file-manager
           moonlight-web-stream
           sunshine
           ;
