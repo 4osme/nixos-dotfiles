@@ -1,5 +1,4 @@
-# Home Manager delivery of the dotfiles — the NixOS-native replacement for the
-# fedora-hyprtomic /etc/skel sync. Every file under files/home (plus the
+# Home Manager delivery of the dotfiles. Every file under files/home (plus the
 # host's files/home-<host> overlay, e.g. monitors.lua / host.lua on
 # main-desktop) becomes a read-only Nix store link in $HOME.
 #

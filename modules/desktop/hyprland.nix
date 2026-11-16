@@ -1,7 +1,6 @@
 # The Hyprland session (the compositor, uwsm, portals and lock-screen
 # service). The user configuration (hyprland.lua, hyprlock.conf, …) is
-# delivered by the config sync (files/home → ~/.config), exactly like the
-# source image's /etc/skel.
+# delivered by Home Manager from files/home to ~/.config.
 { pkgs, ... }:
 {
   programs.hyprland = {

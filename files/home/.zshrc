@@ -65,14 +65,7 @@ if [[ "${terminfo[kdch1]}" != "" ]]; then bindkey "${terminfo[kdch1]}" delete-ch
 if [[ "${terminfo[khome]}" != "" ]]; then bindkey "${terminfo[khome]}" beginning-of-line; fi
 if [[ "${terminfo[kend]}"  != "" ]]; then bindkey "${terminfo[kend]}"  end-of-line; fi
 
-# Plugins (install with your package manager or manually)
-# zsh-autosuggestions (Fedora ships to /usr/share/zsh-autosuggestions/)
-[[ -f /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh ]] && \
-    source /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh
-
-# zsh-syntax-highlighting (Fedora ships to /usr/share/zsh-syntax-highlighting/)
-[[ -f /usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh ]] && \
-    source /usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
+# Plugins are provided by ~/.config/zshrc.d/10-nix-plugins.zsh (home/zsh.nix).
 
 # Extra shell snippets (e.g. generated terminal colors)
 for f in ~/.config/zshrc.d/*.zsh(N) ~/.config/zshrc.d/*.sh(N); do

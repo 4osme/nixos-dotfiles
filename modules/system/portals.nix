@@ -1,8 +1,6 @@
-# XDG portals (the source install: Gtk + gnome-background, with
-# hyprland-portals.conf in skel). xdg-desktop-portal-gnome provides the
-# Background interface for Flatpak autostart toggles; the file chooser stays
-# GTK (the source skel pointed it at KDE, whose portal is not installed here —
-# adjust to taste).
+# XDG portals: GTK + GNOME background (xdg-desktop-portal-gnome provides the
+# Background interface for Flatpak autostart toggles). The file chooser stays
+# GTK since xdg-desktop-portal-kde is not installed.
 { pkgs, ... }:
 {
   xdg.portal = {

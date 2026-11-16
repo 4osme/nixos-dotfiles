@@ -16,8 +16,7 @@
     ];
   };
 
-  # Arrow Lake-P iGPU (8086:7d51) runs on the xe driver like on the Fedora
-  # host; ban i915 so it can never claim the iGPU. (The B580 itself is bound
-  # to vfio-pci — see vfio.nix.)
+  # Arrow Lake-P iGPU (8086:7d51) runs on the xe driver; ban i915 so it can
+  # never claim the iGPU.
   boot.blacklistedKernelModules = [ "i915" ];
 }

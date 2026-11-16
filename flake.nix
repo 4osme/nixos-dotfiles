@@ -123,8 +123,6 @@
         inherit (pkgs)
           hyprbind
           hypremoji
-          vypr
-          hyprtomic-vypr-scripts
           fcitx5-mozkey
           sddm-hyprtomic-theme
           google-sans-flex

@@ -1,6 +1,4 @@
-# main-desktop — the environment that replaces the current distrobox host
-# ("this machine"): Intel Core Ultra 200 (Arrow Lake) desktop with the Arc
-# B580 assigned to a Vypr Windows VM.
+# main-desktop — Intel Core Ultra 200 (Arrow Lake) desktop.
 { ... }:
 {
   imports = [

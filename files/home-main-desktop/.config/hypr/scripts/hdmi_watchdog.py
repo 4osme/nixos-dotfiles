@@ -60,8 +60,8 @@ RECOVERY_COOLDOWN = 60.0
 MAX_RECOVERIES = 3
 BACKOFF = 600.0
 
-HYPRCTL = shutil.which("hyprctl") or "/run/host/usr/bin/hyprctl"
-DDCUTIL = shutil.which("ddcutil") or "/run/host/usr/bin/ddcutil"
+HYPRCTL = shutil.which("hyprctl") or "hyprctl"
+DDCUTIL = shutil.which("ddcutil") or "ddcutil"
 
 running = True
 bus = None

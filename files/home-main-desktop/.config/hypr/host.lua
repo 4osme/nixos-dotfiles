@@ -33,7 +33,7 @@ end
 -- Registering a layout algorithm is what makes Hyprland re-evaluate existing
 -- workspaces; a workspace rule alone does not trigger it. This no-op
 -- registration (after the rules above) makes them apply on `hyprctl reload`.
-hl.layout.register("hyprtomic-refresh", { recalculate = function() end })
+hl.layout.register("dotfiles-refresh", { recalculate = function() end })
 
 -- Sunshine streaming profiles (manual `sunshine-session start` / `stop`).
 -- The manual helper creates the HEADLESS-1 virtual output (FullHD); while a
@@ -94,7 +94,7 @@ if sunshineProfile then
         hl.workspace_rule({ workspace = tostring(i), layout = "dwindle" })
     end
     -- Refresh existing workspaces after applying the temporary rules.
-    hl.layout.register("hyprtomic-stream-refresh", { recalculate = function() end })
+    hl.layout.register("dotfiles-stream-refresh", { recalculate = function() end })
 elseif sunshineNative then
     sunshineNative:close()
     -- Native streaming: keep the resolution but disable the other outputs and

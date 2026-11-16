@@ -1,6 +1,5 @@
-# Common system layer of every HyprTomic NixOS machine: OS basics, session
-# services, KVM/distrobox/flatpak foundations and the desktop plumbing that the
-# fedora-hyprtomic host image shipped.
+# Common system layer of every NixOS machine: OS basics, session services,
+# distrobox/flatpak foundations and the desktop plumbing.
 { lib, ... }:
 {
   imports = [
@@ -17,13 +16,12 @@
     ./portals.nix
     ./flatpak.nix
     ./distrobox.nix
-    ./virt.nix
     ./security.nix
     ./packages.nix
     ./hardware.nix
   ];
 
-  # The custom packages (hyprbind, mozkey, Vypr, …).
+  # The custom packages (hyprbind, mozkey, …).
   nixpkgs.overlays = [ (import ../../overlays) ];
 
   # TODO(manual): bump once at install; never change afterwards (see the
