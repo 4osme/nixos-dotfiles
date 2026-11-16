@@ -42,25 +42,39 @@ sunshine-session stop --tunnel
 個別に操作する場合は `systemctl --user start/stop cloudflared-tunnel`。
 `sunshine-session status` で現在の状態を確認できる。
 
-## 仮想モニタ (HEADLESS-1)
+## 仮想モニタ (HEADLESS-1) とモニタ切替
 
 `sunshine-session start` は次の順で動く:
 
 1. Hyprland に `HEADLESS-1` (1920x1080@60 の仮想出力) を作成する。
 2. `~/.config/sunshine/sunshine.conf` (unmanaged) の `capture` / `output_name` を
    `wlr` / `HEADLESS-1` に切り替える。
-3. `sunshine.service` を起動する。
-4. `~/.config/hypr/host.lua` の 1080p プロファイルを適用し、
-   HDMI-A-1 / HDMI-A-2 を無効化して仮想出力を 0x0 に置く。
+3. `$XDG_RUNTIME_DIR/sunshine-hypr-display/session.active` を書く。
+4. `hyprctl reload` で `~/.config/hypr/host.lua` のセッションプロファイルを適用する。
+   HEADLESS-1 を 0x0 / 1080p60 に置き、それ以外の出力 (HDMI-A-1 / HDMI-A-2 など) を
+   すべて無効化する。
+5. `sunshine.service` を起動/再起動する。
 
-`sunshine-session stop` は Sunshine を止めた後、通常のモニター構成
-(Dux Shell が書く `~/.config/hypr/dms/outputs.lua` の HDMI-A-1 + HDMI-A-2) に
-戻して `HEADLESS-1` を削除する。
-状態は `$XDG_RUNTIME_DIR/sunshine-hypr-display/` に置かれ、
-`~/.config/sunshine/hypr-stream-display.py` がクライアント接続/切断時にも
-同じプロファイルを切り替える。クライアント切断時は物理モニターへ戻り、
-`HEADLESS-1` は次回接続のために画面外 (10000x0) へ退避する。
-完全な削除は `sunshine-session stop` が行う。
+クライアントの接続・切断ではこのレイアウトを変えない。切断しても
+HEADLESS-1 と「物理出力オフ」を維持する（4K パネルを点けるとストリームが
+重くなるため）。`session.active` は `sunshine-session stop` まで残る。
+
+`sunshine-session stop` は Sunshine を止めた後、
+
+1. `session.active` と `hypr-stream-display.py` の状態を消す。
+2. `hyprctl reload` で Dux Shell が書く `~/.config/hypr/dms/outputs.lua` を再適用する。
+3. reload で復帰しなかった物理出力を、記憶した mode / position / scale で
+   明示的に戻す。
+4. `HEADLESS-1` を削除する。
+
+これで通常の DMS 定義レイアウトに戻る。`outputs.lua` がまだ無い場合は
+`hyprland.lua` の自動検出 (preferred / auto) になるので、初回は DMS の
+Displays 設定を一度適用しておく。`sunshine.conf` の `output_name` は
+`HEADLESS-1` のまま残るため、次回も `sunshine-session start` から始める。
+
+クライアント単位の 1080p / native 切替は `~/.config/sunshine/hypr-stream-display.py`
+が行う（Sunshine の prep-cmd に登録されている場合）。こちらもセッション中は
+`session.active` を尊重し、切断時に物理モニタを勝手に戻さない。
 
 ## Cloudflare Tunnel のトークン設定
 

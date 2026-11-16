@@ -72,17 +72,43 @@ local function sunshineConfig(key)
     return value
 end
 
+-- Disable every output except the one Sunshine captures. The live monitor list
+-- covers outputs that DMS named differently (or a hot-plugged display); the
+-- fixed list stays as a fallback for the first config load, when the Lua
+-- monitor list can still be empty.
+local function disablePhysicalOutputs(output)
+    local seen = {}
+    local ok, list = pcall(function()
+        return hl.get_monitors and hl.get_monitors({ all = true }) or {}
+    end)
+    if ok and type(list) == "table" then
+        for _, monitor in ipairs(list) do
+            local name = monitor.name
+            if name and name ~= output and not name:find("^HEADLESS%-") then
+                hl.monitor({ output = name, disabled = true })
+                seen[name] = true
+            end
+        end
+    end
+    for _, name in ipairs({ "HDMI-A-1", "HDMI-A-2" }) do
+        if name ~= output and not seen[name] then
+            hl.monitor({ output = name, disabled = true })
+        end
+    end
+end
+
 local function applySunshineLayout(mode)
     local output = sunshineConfig("output_name") or "HEADLESS-1"
     if output == "" then
         output = "HEADLESS-1"
     end
-    hl.monitor({ output = output, mode = mode, position = "0x0", scale = 1.0, transform = 0 })
-    for _, other in ipairs({ "HDMI-A-1", "HDMI-A-2" }) do
-        if other ~= output then
-            hl.monitor({ output = other, disabled = true })
-        end
+    -- A headless output is created at 1920x1080@60; pin that mode explicitly so
+    -- the stream does not inherit a stale "preferred" from another profile.
+    if output:find("^HEADLESS%-") then
+        mode = "1920x1080@60"
     end
+    hl.monitor({ output = output, mode = mode, position = "0x0", scale = 1.0, transform = 0 })
+    disablePhysicalOutputs(output)
 end
 
 if sunshineProfile then

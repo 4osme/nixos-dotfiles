@@ -25,10 +25,9 @@ DIRECTORY = RUNTIME / "sunshine-hypr-display"
 STATE = DIRECTORY / "state.json"
 ACTIVE_1080P = DIRECTORY / "1080p.active"
 ACTIVE_NATIVE = DIRECTORY / "native.active"
-# Written while the streaming profile still has to put the physical outputs
-# back. The HDMI watchdog uses it to tell "the streaming profile disabled the
-# output" from "the user disabled it on purpose".
-RESTORE_PENDING = DIRECTORY / "restore-pending"
+# Written by `sunshine-session start`; it owns the physical layout for the whole
+# session. A client connect/disconnect must not bring the physical outputs back.
+SESSION_MARKER = DIRECTORY / "session.active"
 MODE = re.compile(r"^(\d+)x(\d+)@(\d+(?:\.\d+)?)(?:Hz)?$")
 HEADLESS_PREFIX = "HEADLESS-"
 LOG = Path.home() / ".config/sunshine/sunshine.log"
@@ -174,7 +173,7 @@ def physical_outputs(env):
     outputs = []
     for item in items:
         name = item.get("name", "")
-        if not name.startswith("HDMI-") or item.get("disabled"):
+        if name.startswith(HEADLESS_PREFIX) or item.get("disabled"):
             continue
         outputs.append({
             "output": name,
@@ -218,33 +217,22 @@ def enable_outputs(outputs, env):
             log("failed to re-enable output %s: %s" % (item["output"], error))
 
 
-def outputs_restored(outputs, env):
-    """True when every remembered output is enabled again."""
-    if not outputs:
-        return True
-    try:
-        current = monitors(env)
-    except (subprocess.SubprocessError, json.JSONDecodeError):
-        return False
-    disabled = {item.get("name") for item in current if item.get("disabled")}
-    return not any(item["output"] in disabled for item in outputs)
-
-
 def restore(state, env):
     ACTIVE_1080P.unlink(missing_ok=True)
     ACTIVE_NATIVE.unlink(missing_ok=True)
     if env:
         run("hyprctl", "reload", env=env)
+        if SESSION_MARKER.exists():
+            # `sunshine-session start` owns the physical layout until
+            # `sunshine-session stop`: a client disconnect or pause must not
+            # wake the 4K panel (that makes the stream heavier).
+            log("session scope active; keeping the streaming layout")
+            return
         # The reload re-applies the monitor rules, but an output that could not
         # be brought up stays disabled. Put the physical outputs back so they
         # return on their own.
         outputs = state.get("physical", [])
         enable_outputs(outputs, env)
-        if outputs and outputs_restored(outputs, env):
-            # Everything is back: the watchdog does not have to step in. Only
-            # touch the marker when this script is the one that disabled the
-            # outputs (the session scope keeps its own marker).
-            RESTORE_PENDING.unlink(missing_ok=True)
         log("reloaded normal Hyprland configuration")
 
 
@@ -338,11 +326,6 @@ def start(profile="1080p"):
         # bring them back (the streaming profile disables them).
         if not state.get("physical"):
             state["physical"] = physical_outputs(env)
-            if state["physical"]:
-                # Tell the HDMI watchdog that an output still has to be put
-                # back, so it may re-enable it on its own.
-                RESTORE_PENDING.write_text(json.dumps(state["physical"]))
-                RESTORE_PENDING.chmod(0o600)
         if LOG.exists():
             stat = LOG.stat()
             state.update(log_offset=stat.st_size, log_inode=stat.st_ino)
