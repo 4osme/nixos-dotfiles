@@ -36,10 +36,13 @@ rustPlatform.buildRustPackage rec {
 
   buildInputs = [ gtk4 ];
 
-  # The picker copies the selection with wl-copy.
-  postFixup = ''
-    wrapProgram $out/bin/hypremoji \
+  # The picker copies the selection with wl-copy. wrapGAppsHook4 creates the
+  # wrapper in postFixup, so extend its arguments instead of wrapping the
+  # already-wrapped binary a second time.
+  preFixup = ''
+    gappsWrapperArgs+=(
       --prefix PATH : ${lib.makeBinPath [ wl-clipboard ]}
+    )
   '';
 
   meta = {

@@ -1,10 +1,15 @@
 # Sunshine JIS patches (vendored from ../sunshine-nix)
 
-This directory is a verbatim copy of the sunshine-nix tree's patch set. The
-same overrideAttrs logic lives in `overlays/default.nix` (it patches nixpkgs'
-`sunshine`), the package is included on main-desktop
-(`modules/environments/main-desktop/sunshine.nix`) and `home/sunshine.nix`
-runs it as a user service.
+This directory is a verbatim copy of the sunshine-nix tree's patch set — the
+patches only, there is no standalone derivation here. The packaging lives in
+the dotfiles overlay: `overlays/default.nix` patches nixpkgs' `sunshine` with
+`overrideAttrs`, including the libvirtualhid patch via `postPatch`. main-desktop
+installs it (`modules/environments/main-desktop/sunshine.nix`) and
+`home/sunshine.nix` runs it as a manual user service.
+
+Because the package is `pkgs.sunshine` after the overlay is applied, it is also
+in `flake.nix`'s `packages` output (`nix build .#sunshine`) and in the CI
+package list; no separate `nix-build ./default.nix` exists anymore.
 
 ---
 
@@ -28,12 +33,15 @@ LizardByte 側の JIS 対応 PR は **まだ未マージ**です（2026-10 時�
 ## 内容
 
 ```
-default.nix
 patches/
   0001-sunshine-non-normalized-key-flag.patch     # uinput 経路にも non-normalized フラグを通す
   0002-sunshine-wayland-retry.patch               # Wayland レイアウト検証のリトライ（JIS 以外の推奨修正）
   0003-libvirtualhid-jis-keyboard-mapping.patch   # JIS マッピング本体（uhid バックエンド）
 ```
+
+`0001` / `0002` は通常の `patches`（Sunshine 本体）、`0003` は
+`third-party/libvirtualhid` を対象にするため、overlay の `postPatch` で
+`patch -d third-party/libvirtualhid -p1` として当てています。
 
 ### 検証済みの適用先
 
@@ -50,18 +58,19 @@ nixpkgs が Sunshine を更新したら、その submodule pin に合わせて 0
 
 ## 使い方
 
-flake なし:
-
-```sh
-nix-build ./default.nix
-```
-
-システム設定・overlay から:
+overlay 経由（dotfiles の標準経路）:
 
 ```nix
-# flake.nix などで
-sunshine-jis = import /path/to/sunshine-nix { pkgs = pkgs; };
-# → environment.systemPackages = [ sunshine-jis ];
+# nixpkgs.overlays = [ (import ./overlays) ];
+# 以降 pkgs.sunshine がパッチ済み。main-desktop は
+# modules/environments/main-desktop/sunshine.nix で environment.systemPackages に
+# 入れ、home/sunshine.nix の user unit から起動する。
+```
+
+単体でビルドする場合（CI と同じ）:
+
+```sh
+nix build .#sunshine
 ```
 
 `ENABLE_BROKEN_AV1_ENCODER`（SVT-AV1 ソフトウェア AV1）は**触っていません**。
