@@ -39,11 +39,9 @@ hl.layout.register("dotfiles-refresh", { recalculate = function() end })
 -- The manual helper creates the HEADLESS-1 virtual output (FullHD); while a
 -- stream profile marker exists this config moves that output to 0x0 and
 -- disables the physical HDMI outputs. `sunshine-session stop` removes the
--- marker and the virtual output, which restores monitors.lua.
---
--- Persistent normal mode. Keep this in sync with monitors.lua:
--- HDMI-A-1 (4K) sits to the right of the rotated HDMI-A-2.
-hl.monitor({ output = "HDMI-A-1", mode = "3840x2160@60", position = "648x0", scale = 1.0, transform = 0 })
+-- marker and the virtual output; the normal layout then comes back from Dux
+-- Shell's `~/.config/hypr/dms/outputs.lua` (the only monitor source: DMS /
+-- nwg-displays wrote it, and `hyprctl reload` re-applies it).
 
 local sunshineRuntime = os.getenv("XDG_RUNTIME_DIR") or "/run/user/1000"
 local sunshineProfile = io.open(sunshineRuntime .. "/sunshine-hypr-display/1080p.active", "r")
@@ -112,7 +110,7 @@ else
     else
         -- No session and no client: keep the virtual output alive (Sunshine's
         -- encoder probe needs a live output) and park it far to the right so
-        -- monitors.lua keeps the physical layout. This also catches a
+        -- Dux Shell's outputs.lua keeps the physical layout. This also catches a
         -- HEADLESS-* output left behind by a crashed session.
         local output = sunshineConfig("output_name") or "HEADLESS-1"
         if output:find("^HEADLESS%-") then

@@ -5,7 +5,8 @@
 -- は登録のみ行い、適用は workspace_rule に委ねる。
 --
 -- 設定はすべて Home Manager 管理 (NixOS): このファイル・theme.lua・
--- monitors.lua・workspaces.lua・host.lua は Nix store からのリンク。
+-- workspaces.lua・host.lua は Nix store からのリンク。モニタ構成は
+-- Dux Shell が書く ~/.config/hypr/dms/outputs.lua が唯一の管理元。
 -- マシン固有・個人用の追加 (workspace 割当・quadgrid・Sunshine 等) は
 -- host.lua (host overlay) に置く。テーマ (壁紙・GTK/Qt アプリ配色) は Dux
 -- Shell が管理する (壁紙を起点に matugen で生成)。
@@ -40,15 +41,9 @@ local function _exists(p)
     return false
 end
 
--- nwg-displays support: the GUI (Arch container) writes Lua layouts when you
--- apply monitor settings and workspace assignments. Load them before
--- local.conf so a manual override still wins.
-if _exists(_HOME .. "/.config/hypr/monitors.lua") then
-    local ok = pcall(require, "monitors")
-    if not ok then
-        hl.notification.create({ text = "hypr: ~/.config/hypr/monitors.lua failed to load; using auto-detect", duration = 5000 })
-    end
-end
+-- Workspace assignments written by nwg-displays (`~/.config/hypr/workspaces.lua`).
+-- Monitor layout itself is owned by Dux Shell (`~/.config/hypr/dms/outputs.lua`,
+-- loaded below), so nothing here sets hl.monitor for the normal mode.
 if _exists(_HOME .. "/.config/hypr/workspaces.lua") then
     local ok = pcall(require, "workspaces")
     if not ok then
@@ -71,8 +66,8 @@ hl.env("XCURSOR_SIZE", "36")
 hl.env("XDG_CURRENT_DESKTOP", "Hyprland")
 hl.env("XDG_SESSION_TYPE", "wayland")
 hl.env("XDG_SESSION_DESKTOP", "Hyprland")
--- IME: fcitx5 runs inside the GUI container, but the container shares the
--- host session bus, so host GTK/Qt apps reach it through these variables.
+-- IME: fcitx5 runs on the host (modules/system/locale.nix) and GTK/Qt apps
+-- reach it through these variables.
 hl.env("GTK_IM_MODULE", "fcitx")
 hl.env("QT_IM_MODULE", "fcitx")
 hl.env("XMODIFIERS", "@im=fcitx")

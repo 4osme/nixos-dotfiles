@@ -54,7 +54,8 @@ sunshine-session stop --tunnel
    HDMI-A-1 / HDMI-A-2 を無効化して仮想出力を 0x0 に置く。
 
 `sunshine-session stop` は Sunshine を止めた後、通常のモニター構成
-(`monitors.lua` の HDMI-A-1 + HDMI-A-2) に戻して `HEADLESS-1` を削除する。
+(Dux Shell が書く `~/.config/hypr/dms/outputs.lua` の HDMI-A-1 + HDMI-A-2) に
+戻して `HEADLESS-1` を削除する。
 状態は `$XDG_RUNTIME_DIR/sunshine-hypr-display/` に置かれ、
 `~/.config/sunshine/hypr-stream-display.py` がクライアント接続/切断時にも
 同じプロファイルを切り替える。クライアント切断時は物理モニターへ戻り、
