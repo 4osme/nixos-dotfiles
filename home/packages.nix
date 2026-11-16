@@ -13,7 +13,16 @@
     google-chrome
     easyeffects
     sshfs # = sshfs-fuse
+    # 設定は files/home/.config/nvim (lazy.nvim の実体は ~/.local/share/nvim)
     neovim
+    # neovim 設定が検出して使う外部ツール: ripgrep = 検索ピッカー、
+    # lazygit = <leader>gg、gcc = nvim-treesitter のパーサ、curl/tar = lazygit
+    # の自動導入。無い場合は機能だけ落ちる (lua/config/env.lua)。
+    ripgrep
+    lazygit
+    gcc
+    curl
+    gnutar
     ghostty
     zsh
 
