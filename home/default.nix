@@ -13,6 +13,7 @@
     ./zsh.nix
     ./services.nix
     ./dotfiles.nix
+    ./matugen.nix
     # The Dux modules replace the old Home Manager component gtk/qt theme set
     # (theme.nix is gone): Dux Shell's matugen theming picks the wallpaper and
     # generates GTK/Qt colors.
