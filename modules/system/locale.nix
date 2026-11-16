@@ -23,8 +23,10 @@
     enable = true;
     type = "fcitx5";
     fcitx5 = {
-      # mozkey (the engine in ~/.config/fcitx5/profile) is not in nixpkgs;
-      # pkgs/mozkey builds Masterisk-F/fcitx-mozkey from source.
+      # mozkey is not in nixpkgs; pkgs/mozkey builds
+      # Masterisk-F/fcitx-mozkey from source. The engine selection lives in
+      # the user-managed ~/.config/fcitx5/profile (not shipped by the dotfiles:
+      # fcitx5 rewrites it at runtime).
       addons = [ pkgs.fcitx5-mozkey ];
       # Keep the classic GTK/Qt immodule wiring the source config exports
       # (GTK_IM_MODULE=fcitx etc. in hyprland.lua) instead of the Wayland
