@@ -125,7 +125,6 @@
           hypremoji
           fcitx5-mozkey
           sddm-hyprtomic-theme
-          google-sans-flex
           libfprint-cs9711
           moonlight-web-stream
           sunshine

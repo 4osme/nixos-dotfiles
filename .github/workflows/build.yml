@@ -86,6 +86,5 @@ jobs:
             .#packages.x86_64-linux.hypremoji \
             .#packages.x86_64-linux.fcitx5-mozkey \
             .#packages.x86_64-linux.sddm-hyprtomic-theme \
-            .#packages.x86_64-linux.google-sans-flex \
             .#packages.x86_64-linux.libfprint-cs9711 \
             .#packages.x86_64-linux.sunshine
