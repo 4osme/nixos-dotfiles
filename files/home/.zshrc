@@ -8,14 +8,15 @@ setopt hist_ignore_dups
 setopt hist_ignore_all_dups
 
 # Alias
-alias opencode='opencode2'
-alias vim='nvim'
-alias ls='ls --color=auto'
 alias grep='grep --color=auto'
+alias ls='ls --color=auto'
+alias opencode='opencode --auto'
+alias vim='nvim'
 
 # Env
 export EDITOR=vim
 export WORDCHARS='*?_.[]~-=&;!#$%^(){}<>'
+export PATH="$PATH:$HOME/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 # Options
 setopt auto_cd
@@ -28,6 +29,30 @@ setopt nonomatch
 setopt correct
 setopt list_packed
 setopt magic_equal_subst
+
+# Extra shell snippets (shortcuts.zsh, generated terminal colors) and, on
+# NixOS, the store paths the .zshrc itself cannot know about
+# (home/zsh.nix → zshrc.d/10-antidote.zsh). Sourced before compinit so
+# drop-ins can extend the completion setup.
+for f in ~/.config/zshrc.d/*.zsh(N) ~/.config/zshrc.d/*.sh(N); do
+    source "$f"
+done
+
+# Plugins (antidote). On NixOS ~/.config/zshrc.d/10-antidote.zsh points
+# ANTIDOTE_ZSH_FILE at the nixpkgs copy; a manual install (distrobox) lives in
+# ~/.antidote or ~/.local/share/antidote. The plugin list is shared by both
+# (~/.zsh_plugins.txt, delivered by home/dotfiles.nix from files/home).
+#
+# Loaded before compinit so kind:fpath plugins (zsh-completions) land in
+# $fpath in time. Plugins that must run after compinit are marked kind:defer
+# in the list (zsh-syntax-highlighting) and are sourced at the first prompt.
+for antidote_zsh in "${ANTIDOTE_ZSH_FILE:-$HOME/.antidote/antidote.zsh}" "$HOME/.local/share/antidote/antidote.zsh"; do
+    [[ -r "$antidote_zsh" ]] || continue
+    source "$antidote_zsh"
+    [[ -r "$HOME/.zsh_plugins.txt" ]] && antidote load "$HOME/.zsh_plugins.txt"
+    break
+done
+unset antidote_zsh
 
 # Completion
 autoload -Uz compinit && compinit
@@ -46,7 +71,7 @@ zstyle ':vcs_info:git:*' unstagedstr "%F{yellow}+"
 zstyle ':vcs_info:*' formats "%F{cyan}%c%u[%b]%f"
 zstyle ':vcs_info:*' actionformats '[%b|%a]'
 precmd () { vcs_info }
-PROMPT='%F{magenta}%B%n%b%f@%F{blue}%U%m%u%f:%F{green}%1~%f%F{cyan}$vcs_info_msg_0_%f%F{white}$%f '
+PROMPT='%F{magenta}%B%n%b%f@%F{blue}%U${CONTAINER_ID:-%m}%u%f:%F{green}%1~%f%F{cyan}$vcs_info_msg_0_%f%F{white}$%f '
 
 # Key bindings
 bindkey '^[[H'  beginning-of-line
@@ -65,17 +90,20 @@ if [[ "${terminfo[kdch1]}" != "" ]]; then bindkey "${terminfo[kdch1]}" delete-ch
 if [[ "${terminfo[khome]}" != "" ]]; then bindkey "${terminfo[khome]}" beginning-of-line; fi
 if [[ "${terminfo[kend]}"  != "" ]]; then bindkey "${terminfo[kend]}"  end-of-line; fi
 
-# Plugins are provided by ~/.config/zshrc.d/10-nix-plugins.zsh (home/zsh.nix).
-
-# Extra shell snippets (e.g. generated terminal colors)
-for f in ~/.config/zshrc.d/*.zsh(N) ~/.config/zshrc.d/*.sh(N); do
-    source "$f"
-done
-
 # Bitwarden SSH agent. Native install (nixpkgs bitwarden-desktop) uses the
 # home-directory socket; the flatpak path is kept as a fallback.
 if [[ -S "$HOME/.bitwarden-ssh-agent.sock" ]]; then
     export SSH_AUTH_SOCK="$HOME/.bitwarden-ssh-agent.sock"
 elif [[ -S "$HOME/.var/app/com.bitwarden.desktop/data/.bitwarden-ssh-agent.sock" ]]; then
     export SSH_AUTH_SOCK="$HOME/.var/app/com.bitwarden.desktop/data/.bitwarden-ssh-agent.sock"
+fi
+
+# android-develop-tools
+if [ -d "$HOME/platform-tools" ] ; then
+    PATH="$HOME/platform-tools:$PATH"
+fi
+
+# set PATH so it includes users private bin if it exists
+if [ -d "$HOME/bin" ] ; then
+    PATH="$HOME/bin:$PATH"
 fi

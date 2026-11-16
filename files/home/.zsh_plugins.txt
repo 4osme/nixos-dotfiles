@@ -1,0 +1,10 @@
+# antidote plugin list (shared by the NixOS and distrobox shells).
+# ~/.zshrc loads this before compinit; on NixOS antidote itself comes from
+# nixpkgs (home/zsh.nix), elsewhere from ~/.local/share/antidote.
+#
+# path:src kind:fpath — adds the plugin's src/ to $fpath (completion only).
+# kind:defer — sourced by zsh-defer at the first prompt: syntax highlighting
+#              must run after compinit and after the rest of the .zshrc.
+zsh-users/zsh-completions path:src kind:fpath
+zsh-users/zsh-autosuggestions
+zsh-users/zsh-syntax-highlighting kind:defer
