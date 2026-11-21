@@ -33,17 +33,15 @@ end
 -- Registering a layout algorithm is what makes Hyprland re-evaluate existing
 -- workspaces; a workspace rule alone does not trigger it. This no-op
 -- registration (after the rules above) makes them apply on `hyprctl reload`.
-hl.layout.register("hyprtomic-refresh", { recalculate = function() end })
+hl.layout.register("dotfiles-refresh", { recalculate = function() end })
 
 -- Sunshine streaming profiles (manual `sunshine-session start` / `stop`).
 -- The manual helper creates the HEADLESS-1 virtual output (FullHD); while a
 -- stream profile marker exists this config moves that output to 0x0 and
 -- disables the physical HDMI outputs. `sunshine-session stop` removes the
--- marker and the virtual output, which restores monitors.lua.
---
--- Persistent normal mode. Keep this in sync with monitors.lua:
--- HDMI-A-1 (4K) sits to the right of the rotated HDMI-A-2.
-hl.monitor({ output = "HDMI-A-1", mode = "3840x2160@60", position = "648x0", scale = 1.0, transform = 0 })
+-- marker and the virtual output; the normal layout then comes back from Dux
+-- Shell's `~/.config/hypr/dms/outputs.lua` (the only monitor source: DMS /
+-- nwg-displays wrote it, and `hyprctl reload` re-applies it).
 
 local sunshineRuntime = os.getenv("XDG_RUNTIME_DIR") or "/run/user/1000"
 local sunshineProfile = io.open(sunshineRuntime .. "/sunshine-hypr-display/1080p.active", "r")
@@ -74,17 +72,43 @@ local function sunshineConfig(key)
     return value
 end
 
+-- Disable every output except the one Sunshine captures. The live monitor list
+-- covers outputs that DMS named differently (or a hot-plugged display); the
+-- fixed list stays as a fallback for the first config load, when the Lua
+-- monitor list can still be empty.
+local function disablePhysicalOutputs(output)
+    local seen = {}
+    local ok, list = pcall(function()
+        return hl.get_monitors and hl.get_monitors({ all = true }) or {}
+    end)
+    if ok and type(list) == "table" then
+        for _, monitor in ipairs(list) do
+            local name = monitor.name
+            if name and name ~= output and not name:find("^HEADLESS%-") then
+                hl.monitor({ output = name, disabled = true })
+                seen[name] = true
+            end
+        end
+    end
+    for _, name in ipairs({ "HDMI-A-1", "HDMI-A-2" }) do
+        if name ~= output and not seen[name] then
+            hl.monitor({ output = name, disabled = true })
+        end
+    end
+end
+
 local function applySunshineLayout(mode)
     local output = sunshineConfig("output_name") or "HEADLESS-1"
     if output == "" then
         output = "HEADLESS-1"
     end
-    hl.monitor({ output = output, mode = mode, position = "0x0", scale = 1.0, transform = 0 })
-    for _, other in ipairs({ "HDMI-A-1", "HDMI-A-2" }) do
-        if other ~= output then
-            hl.monitor({ output = other, disabled = true })
-        end
+    -- A headless output is created at 1920x1080@60; pin that mode explicitly so
+    -- the stream does not inherit a stale "preferred" from another profile.
+    if output:find("^HEADLESS%-") then
+        mode = "1920x1080@60"
     end
+    hl.monitor({ output = output, mode = mode, position = "0x0", scale = 1.0, transform = 0 })
+    disablePhysicalOutputs(output)
 end
 
 if sunshineProfile then
@@ -94,7 +118,7 @@ if sunshineProfile then
         hl.workspace_rule({ workspace = tostring(i), layout = "dwindle" })
     end
     -- Refresh existing workspaces after applying the temporary rules.
-    hl.layout.register("hyprtomic-stream-refresh", { recalculate = function() end })
+    hl.layout.register("dotfiles-stream-refresh", { recalculate = function() end })
 elseif sunshineNative then
     sunshineNative:close()
     -- Native streaming: keep the resolution but disable the other outputs and
@@ -112,7 +136,7 @@ else
     else
         -- No session and no client: keep the virtual output alive (Sunshine's
         -- encoder probe needs a live output) and park it far to the right so
-        -- monitors.lua keeps the physical layout. This also catches a
+        -- Dux Shell's outputs.lua keeps the physical layout. This also catches a
         -- HEADLESS-* output left behind by a crashed session.
         local output = sunshineConfig("output_name") or "HEADLESS-1"
         if output:find("^HEADLESS%-") then
@@ -129,21 +153,3 @@ hl.on("hyprland.start", function()
 end)
 -- Start it on a reload of an already running session as well.
 hl.exec_cmd(sunshineDisplayWatcher)
-
--- HDMI-A-1 (4K / ASUS VA32U) watchdog: 入力ソース切替・HPD切断・復帰後に
--- リンクが落ちることがあるため、DRM/Hyprland/DDCを監視して自動で再同期する。
--- ログ: ~/.local/state/hdmi-watchdog.log / 状態: hdmi_watchdog.py --status
--- スクリプト側で flock しているので、reload で重複起動しても1個だけ残る。
--- 2026-10-27: 復帰判定を 2 点に絞った。
---   1) DDC ポーリングはコンポーザーが output を on にしている間だけ。寝ている
---      モニターへの DDC アクセスは起こ anderem、 read が失敗してまた寝る。
---   2) 「output が disabled なら復帰」は restore-pending マーカーがあるとき
---      だけ（= ストリーミングプロファイルで無効化したもの）。ユーザーが自分で
---      無効化した output は触らない。
--- 3) モニターが DDC に応答しない（眠っている）ときは dpms_on() をスキップ
---    し、入力サイクル（確実に起こせる手段）へ直行する。
-local hdmiWatchdog = 'python3 "$HOME/.config/hypr/scripts/hdmi_watchdog.py"'
-hl.on("hyprland.start", function()
-    hl.exec_cmd(hdmiWatchdog)
-end)
-hl.exec_cmd(hdmiWatchdog)

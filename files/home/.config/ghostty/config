@@ -5,8 +5,8 @@
 # The palette lives in the dankcolors theme (Dux Shell matugen), set at the
 # end of this file.
 # ── Font ──
-# HackGen Console NF ships in the GUI container (AUR ttf-hackgen-nerd); the
-# host ghostty falls back to a host-available monospace CJK font.
+# HackGen Console NF comes from hackgen-nf-font (modules/nixos/system/fonts.nix);
+# Noto Sans Mono CJK JP is the CJK fallback.
 font-family = "HackGen Console NF", "Noto Sans Mono CJK JP"
 font-size = 12
 

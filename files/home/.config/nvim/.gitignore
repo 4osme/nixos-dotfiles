@@ -1,0 +1,6 @@
+# dotfiles 側では lazy-lock.json もコミットしてバージョンを固定する
+# (元リポジトリと同じ扱い。無視すると pin が失われるため)
+# lazy-lock.json
+# lazygit 自動導入の残骸(誤コミット防止)
+/lazygit
+/lazygit.tar.gz

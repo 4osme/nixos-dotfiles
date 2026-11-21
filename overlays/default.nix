@@ -1,16 +1,12 @@
 # Packages that fedora-hyprtomic built or pinned itself: hyprbind (the
 # custom-built keybind viewer), the mozkey IME, the SDDM astronaut theme
-# overlay, Google Sans Flex, Vypr and the CS9711 libfprint fork.
+# overlay and the CS9711 libfprint fork.
 final: prev: {
   hyprbind = final.callPackage ../pkgs/hyprbind { };
   hypremoji = final.callPackage ../pkgs/hypremoji { };
-  vypr = final.callPackage ../pkgs/vypr { };
-  hyprtomic-vypr-scripts = final.callPackage ../pkgs/vypr/scripts.nix { };
   fcitx5-mozkey = final.callPackage ../pkgs/mozkey { };
   sddm-hyprtomic-theme = final.callPackage ../pkgs/sddm-theme { };
-  google-sans-flex = final.callPackage ../pkgs/google-sans-flex { };
   libfprint-cs9711 = final.callPackage ../pkgs/libfprint-cs9711 { };
-  moonlight-web-stream = final.callPackage ../pkgs/moonlight-web-stream { };
 
   # nixpkgs 26.05's tela-circle-icon-theme ships a few dangling XSI alias
   # symlinks and the fixup check rejects the build (so it is not on

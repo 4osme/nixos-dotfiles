@@ -66,7 +66,7 @@ jobs:
           authToken: ${{ env.CACHIX_AUTH_TOKEN }}
 
       - name: Check formatting
-        run: nix fmt -- --check .
+        run: nix fmt -- --ci .
 
       - name: Evaluate the system
         run: |
@@ -84,10 +84,7 @@ jobs:
           nix build -L --no-link \
             .#packages.x86_64-linux.hyprbind \
             .#packages.x86_64-linux.hypremoji \
-            .#packages.x86_64-linux.vypr \
-            .#packages.x86_64-linux.hyprtomic-vypr-scripts \
             .#packages.x86_64-linux.fcitx5-mozkey \
             .#packages.x86_64-linux.sddm-hyprtomic-theme \
-            .#packages.x86_64-linux.google-sans-flex \
             .#packages.x86_64-linux.libfprint-cs9711 \
             .#packages.x86_64-linux.sunshine

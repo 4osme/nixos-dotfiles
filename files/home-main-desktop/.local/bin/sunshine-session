@@ -2,15 +2,15 @@
 """Manual Sunshine session helper for main-desktop.
 
   start   create the HEADLESS-1 virtual output (1920x1080@60), switch Hyprland
-          to it (physical outputs disabled) and restart the Sunshine user unit
-  stop    stop Sunshine, restore the physical monitor layout and remove the
-          virtual output
-  status  print the Sunshine/cloudflared units and the current monitor layout
+          to it (physical outputs disabled until `stop`) and restart the
+          Sunshine user unit
+  stop    stop Sunshine, re-apply Dux Shell's monitor layout (DMS outputs.lua)
+          and remove the virtual output
+  status  print the Sunshine unit and the current monitor layout
 
-`--tunnel` also starts/stops the cloudflared-tunnel unit. Sunshine and the
-tunnel are intentionally not started by systemd at login. The display profile
-is defined in ~/.config/hypr/host.lua; the marker written by
-hypr-stream-display.py selects it.
+Sunshine is intentionally not started by systemd at login. The display
+profile is defined in ~/.config/hypr/host.lua; the `session.active` marker
+written by this helper selects it, and hypr-stream-display.py respects it.
 """
 import argparse
 import json
@@ -28,7 +28,7 @@ CONFIG = Path.home() / ".config/sunshine/sunshine.conf"
 HELPER = Path.home() / ".config/sunshine/hypr-stream-display.py"
 HEADLESS = "HEADLESS-1"
 HEADLESS_PREFIX = "HEADLESS-"
-MARKERS = ("1080p.active", "native.active", "restore-pending", "state.json")
+MARKERS = ("1080p.active", "native.active", "state.json")
 # Session scope marker: while it exists the physical outputs stay disabled for
 # the whole session. A client connect/disconnect must not bring the 4K panel
 # back, that makes the stream heavier.
@@ -71,6 +71,10 @@ def require_hypr():
 
 def monitors(env):
     return json.loads(run("hyprctl", "monitors", "-j", env=env).stdout)
+
+
+def all_monitors(env):
+    return json.loads(run("hyprctl", "monitors", "all", "-j", env=env).stdout)
 
 
 def remove_output(env, name):
@@ -122,19 +126,14 @@ def set_config(key, value):
 
 
 def sunshine(action, check=True):
-    # The unit is defined by home/sunshine.nix but intentionally not enabled.
+    # The unit is defined by modules/home-manager/sunshine.nix but not enabled.
     run("systemctl", "--user", action, "sunshine", check=check)
-
-
-def tunnel(action, check=True):
-    run("systemctl", "--user", action, "cloudflared-tunnel", check=check)
 
 
 def clear_state():
     for name in MARKERS:
         (STATE_DIR / name).unlink(missing_ok=True)
     SESSION_MARKER.unlink(missing_ok=True)
-    (STATE_DIR / "restore-pending").unlink(missing_ok=True)
 
 
 def physical_outputs(env):
@@ -147,7 +146,7 @@ def physical_outputs(env):
     outputs = []
     for item in monitors(env):
         name = item.get("name", "")
-        if not name.startswith("HDMI-") or item.get("disabled"):
+        if name.startswith(HEADLESS_PREFIX) or item.get("disabled"):
             continue
         outputs.append({
             "output": name,
@@ -162,73 +161,79 @@ def physical_outputs(env):
 
 def outputs_restored(outputs, env):
     """True when every remembered output is enabled again."""
-    if not outputs:
-        return True
-    disabled = {item.get("name") for item in monitors(env) if item.get("disabled")}
-    return not any(item["output"] in disabled for item in outputs)
+    enabled = {item.get("name") for item in all_monitors(env) if not item.get("disabled")}
+    return all(item["output"] in enabled for item in outputs)
 
 
-def start(with_tunnel=False):
+def start():
     env = require_hypr()
+    STATE_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+    already_active = SESSION_MARKER.exists()
     name = ensure_headless(env)
-    set_config("capture", "wlr")
-    set_config("output_name", name)
     # Remember the physical outputs and remember that they have to come back
-    # when the session ends.
+    # when the session ends. A second `start` sees them already disabled (the
+    # list is empty), so keep the state written by the first call.
     outputs = physical_outputs(env)
-    PHYSICAL_STATE.write_text(json.dumps(outputs))
-    PHYSICAL_STATE.chmod(0o600)
+    if outputs or not PHYSICAL_STATE.exists():
+        PHYSICAL_STATE.write_text(json.dumps(outputs))
+        PHYSICAL_STATE.chmod(0o600)
+    try:
+        remembered = json.loads(PHYSICAL_STATE.read_text())
+    except (OSError, json.JSONDecodeError):
+        remembered = outputs
     # Session scope: the physical outputs stay disabled for the whole session.
     # A client connect/disconnect must not bring the 4K panel back: rendering
     # to it costs GPU/CPU and makes the stream heavier.
     SESSION_MARKER.touch(mode=0o600)
     # Apply the layout: the physical outputs are disabled and the virtual
     # output is pinned to the origin.
-    run("hyprctl", "reload", env=env)
-    sunshine("restart")
-    if with_tunnel:
-        tunnel("start")
+    try:
+        set_config("capture", "wlr")
+        set_config("output_name", name)
+        run("hyprctl", "reload", env=env)
+        sunshine("restart")
+    except Exception:
+        if not already_active:
+            try:
+                stop()
+            except Exception as error:
+                log(f"rollback failed: {error}; run sunshine-session stop again")
+        raise
     log(
         f"started: Sunshine is capturing {name} (1920x1080@60); physical "
-        f"outputs disabled ({len(outputs)} remembered for the restore)"
+        f"outputs disabled ({len(remembered)} remembered for the restore)"
     )
-    if with_tunnel:
-        log("cloudflared-tunnel started")
 
 
-def stop(with_tunnel=False):
-    sunshine("stop", check=False)
+def stop():
+    sunshine("stop")
     env = hypr_env()
+    had_session = SESSION_MARKER.exists() or PHYSICAL_STATE.exists()
+    try:
+        outputs = json.loads(PHYSICAL_STATE.read_text())
+    except (OSError, json.JSONDecodeError):
+        outputs = []
     # Drop the session scope and the stale markers first: the reload restores
-    # the physical monitor layout.
+    # the physical monitor layout from DMS (~/.config/hypr/dms/outputs.lua).
+    if had_session and not env:
+        raise RuntimeError("Hyprland is unavailable; preserving session state for retry")
     clear_state()
     if env:
         run("hyprctl", "reload", env=env)
-        # The reload re-applies the monitor rules, but an output that could not
-        # be brought up stays disabled. Hand the rest to the HDMI watchdog.
-        try:
-            outputs = json.loads(PHYSICAL_STATE.read_text())
-        except (OSError, json.JSONDecodeError):
-            outputs = []
-        if outputs and not outputs_restored(outputs, env):
-            (STATE_DIR / "restore-pending").write_text(json.dumps(outputs))
-            (STATE_DIR / "restore-pending").chmod(0o600)
-            log("physical outputs are still disabled; the HDMI watchdog will restore them")
+        if had_session:
+            # Do not overwrite DMS rules with stale pre-session geometry.
+            if outputs and not outputs_restored(outputs, env):
+                raise RuntimeError("DMS reload did not restore all physical outputs; state retained for retry")
+            remove_headless(env)
+            if HEADLESS in {item["name"] for item in monitors(env)}:
+                raise RuntimeError("HEADLESS-1 could not be removed; state retained for retry")
     PHYSICAL_STATE.unlink(missing_ok=True)
-    if env:
-        run("hyprctl", "reload", env=env)
-        remove_headless(env)
-    if with_tunnel:
-        tunnel("stop", check=False)
-    log("stopped: Sunshine stopped, physical monitors restored, HEADLESS-1 removed")
-    if with_tunnel:
-        log("cloudflared-tunnel stopped")
+    log("stopped: Sunshine stopped, DMS monitor layout restored, HEADLESS-1 removed")
 
 
 def status():
-    for unit in ("sunshine", "cloudflared-tunnel"):
-        result = run("systemctl", "--user", "is-active", unit, check=False)
-        print(f"{unit}: {result.stdout.strip() or result.stderr.strip()}")
+    result = run("systemctl", "--user", "is-active", "sunshine", check=False)
+    print(f"sunshine: {result.stdout.strip() or result.stderr.strip()}")
     env = hypr_env()
     if not env:
         print("hyprland: not running")
@@ -253,16 +258,11 @@ def status():
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=("start", "stop", "status"))
-    parser.add_argument(
-        "--tunnel",
-        action="store_true",
-        help="also start/stop the cloudflared-tunnel user unit",
-    )
     args = parser.parse_args()
     if args.action == "start":
-        start(args.tunnel)
+        start()
     elif args.action == "stop":
-        stop(args.tunnel)
+        stop()
     else:
         status()
 
