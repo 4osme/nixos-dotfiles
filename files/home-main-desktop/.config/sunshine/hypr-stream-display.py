@@ -92,6 +92,10 @@ def monitors(env):
     return json.loads(run("hyprctl", "monitors", "-j", env=env))
 
 
+def all_monitors(env):
+    return json.loads(run("hyprctl", "monitors", "all", "-j", env=env))
+
+
 def headless_outputs(env):
     return [item["name"] for item in monitors(env) if item["name"].startswith(HEADLESS_PREFIX)]
 
@@ -196,7 +200,7 @@ def enable_outputs(outputs, env):
     if not outputs or not env:
         return
     try:
-        current = monitors(env)
+        current = all_monitors(env)
     except (subprocess.SubprocessError, json.JSONDecodeError):
         return
     disabled = {item.get("name") for item in current if item.get("disabled")}

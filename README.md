@@ -12,5 +12,4 @@ NixOSとHomeManagerを使ったホストの宣言的なシステム管理とdist
 | `sddm-hyprtomic-theme` | Keyitdev/sddm-astronaut-theme + `files/sddm-theme` | GPL-3.0 |
 | `libfprint-cs9711` 1.94.10 | archeYR/libfprint-CS9711 | LGPL-2.1+。1500ms リトライパッチ付き |
 | `sunshine` (JIS) | ../sunshine-nix から vendored (`pkgs/sunshine/`) | GPL-3.0-or-later + MIT (詳細と出典は `pkgs/sunshine/README.md`)。`main-desktop` で手動起動 (`sunshine-session start`) |
-| `moonlight-web-stream` | upstream + `../moonlight-web-stream` のパッチ (`pkgs/moonlight-web-stream/`) | GPL-3.0-or-later。`main-desktop` 専用、手動起動 (`systemctl --user start moonlight-web-stream`) |
-
+| `moonlight-web-stream` | upstream + `../moonlight-web-stream` のパッチ (`pkgs/moonlight-web-stream/`) | GPL-3.0-or-later。パッケージ定義は残すが、`main-desktop` には導入しない |

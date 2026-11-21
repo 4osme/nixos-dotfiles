@@ -4,7 +4,6 @@
 {
   environment.systemPackages = [ pkgs.moonlight-web-stream ];
 
-  # The web UI listens on 0.0.0.0:8080 by default. The Cloudflare tunnel
-  # reaches it over loopback; this also allows direct access on the LAN.
-  networking.firewall.allowedTCPPorts = [ 8080 ];
+  # The tunnel reaches the web UI over loopback; do not expose port 8080
+  # through the host firewall.
 }

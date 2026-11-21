@@ -5,11 +5,8 @@
 #
 # The per-user unit that starts it lives in home/sunshine.nix (imported for
 # main-desktop only). It is intentionally not enabled at login: start it with
-# `sunshine-session start` together with the tunnel (cloudflared-tunnel).
+# `sunshine-session start`.
 { pkgs, ... }:
 {
-  environment.systemPackages = [
-    pkgs.sunshine
-    pkgs.cloudflared
-  ];
+  environment.systemPackages = [ pkgs.sunshine ];
 }

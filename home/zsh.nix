@@ -1,17 +1,10 @@
-# The shipped ~/.zshrc sources ~/.config/zshrc.d/*.zsh before it loads the
-# antidote plugins; the Fedora paths (/usr/share/…, ~/.local/share/antidote)
-# do not exist on NixOS, so the store locations are provided through the same
-# drop-in directory. The .zshrc itself is delivered by Home Manager from
-# files/home/.zshrc.
-#
-# Plugins come from antidote (not from the nixpkgs zsh-* plugin packages):
-# ~/.zsh_plugins.txt is delivered read-only by dotfiles.nix, so the NixOS and
-# distrobox shells share one plugin list. Only antidote itself is taken from
-# nixpkgs; its clone cache stays the default ~/.cache/antidote.
+# NixOS plugins come from the flake-pinned nixpkgs, without network clones.
+# The shared zshrc retains its antidote fallback for non-NixOS environments.
 { pkgs, ... }:
 {
-  xdg.configFile."zshrc.d/10-antidote.zsh".text = ''
-    # NixOS: point ~/.zshrc at the nixpkgs antidote instead of a manual clone.
-    export ANTIDOTE_ZSH_FILE=${pkgs.antidote}/share/antidote/antidote.zsh
+  xdg.configFile."zshrc.d/10-nix-plugins.zsh".text = ''
+    fpath=(${pkgs.zsh-completions}/share/zsh/site-functions $fpath)
+    source ${pkgs.zsh-autosuggestions}/share/zsh-autosuggestions/zsh-autosuggestions.zsh
+    typeset -g DOTFILES_NIX_ZSH_HIGHLIGHT=${pkgs.zsh-syntax-highlighting}/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
   '';
 }

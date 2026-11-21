@@ -1,14 +1,14 @@
-# Sunshine (game streaming host) and the Cloudflare tunnel, both manual and
-# main-desktop only (imported conditionally from home/default.nix).
+# Sunshine (game streaming host), manual and main-desktop only
+# (imported conditionally from home/default.nix).
 #
 # Nothing is enabled at login on purpose: start a streaming session from a
 # terminal/SSH with
 #
-#   sunshine-session start --tunnel   # HEADLESS-1 FullHD + Sunshine + tunnel
+#   sunshine-session start   # HEADLESS-1 FullHD + Sunshine
 #
 # and stop it with
 #
-#   sunshine-session stop --tunnel
+#   sunshine-session stop
 #
 # The display profile lives in files/home-main-desktop/.config/hypr/host.lua;
 # sunshine-session creates the virtual output and the marker.
@@ -32,20 +32,4 @@
     # starts it on demand.
   };
 
-  # The tunnel is defined but never enabled. TUNNEL_TOKEN must be supplied by
-  # the unmanaged (mode 0600) file; see README.md.
-  systemd.user.services.cloudflared-tunnel = {
-    Unit = {
-      Description = "cloudflared tunnel (manual start)";
-      After = [ "network-online.target" ];
-      Wants = [ "network-online.target" ];
-    };
-    Service = {
-      EnvironmentFile = "%h/.config/cloudflared/tunnel.env";
-      ExecStart = "${pkgs.cloudflared}/bin/cloudflared tunnel run --token \${TUNNEL_TOKEN}";
-      Restart = "on-failure";
-      RestartSec = 5;
-    };
-    # No Install section on purpose: `systemctl --user start cloudflared-tunnel`.
-  };
 }

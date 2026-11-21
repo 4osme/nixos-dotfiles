@@ -22,8 +22,7 @@
     inputs.dfiles.homeModules.default
     inputs.dcal.homeModules.dank-calendar
   ]
-  ++ lib.optional (hostName == "main-desktop") ./sunshine.nix
-  ++ lib.optional (hostName == "main-desktop") ./moonlight-web.nix;
+  ++ lib.optional (hostName == "main-desktop") ./sunshine.nix;
 
   home.username = "underdone";
   home.homeDirectory = "/home/underdone";

@@ -1,6 +1,6 @@
 # moonlight-web-stream (WebRTC Moonlight client/server) built from upstream
-# source plus the local patches kept in ./patches. Only main-desktop enables
-# the service; the package is exposed through overlays/default.nix.
+# source plus the local patches kept in ./patches. The package is exposed
+# through overlays/default.nix but is not installed on main-desktop.
 #
 # The source is pinned to upstream master a27f912 (v3 prerelease) and the
 # patches are the JIS keyboard work, the host settings override and the

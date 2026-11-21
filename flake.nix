@@ -113,7 +113,7 @@
 
       # `nix flake check` / the build workflow evaluates and builds these; the
       # binary cache fills from the same derivations.
-      checks = lib.mapAttrs' (
+      checks.${system} = lib.mapAttrs' (
         name: cfg: lib.nameValuePair "system-${name}" cfg.config.system.build.toplevel
       ) hosts;
 

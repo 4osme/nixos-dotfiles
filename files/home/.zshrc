@@ -32,20 +32,20 @@ setopt magic_equal_subst
 
 # Extra shell snippets (shortcuts.zsh, generated terminal colors) and, on
 # NixOS, the store paths the .zshrc itself cannot know about
-# (home/zsh.nix → zshrc.d/10-antidote.zsh). Sourced before compinit so
+# (home/zsh.nix → zshrc.d/10-nix-plugins.zsh). Sourced before compinit so
 # drop-ins can extend the completion setup.
 for f in ~/.config/zshrc.d/*.zsh(N) ~/.config/zshrc.d/*.sh(N); do
     source "$f"
 done
 
-# Plugins (antidote). On NixOS ~/.config/zshrc.d/10-antidote.zsh points
-# ANTIDOTE_ZSH_FILE at the nixpkgs copy; a manual install (distrobox) lives in
-# ~/.antidote or ~/.local/share/antidote. The plugin list is shared by both
-# (~/.zsh_plugins.txt, delivered by home/dotfiles.nix from files/home).
+# Outside NixOS, load plugins with a manual antidote install in ~/.antidote
+# or ~/.local/share/antidote using ~/.zsh_plugins.txt. NixOS instead sources
+# flake-pinned nixpkgs plugins from the drop-in above.
 #
 # Loaded before compinit so kind:fpath plugins (zsh-completions) land in
 # $fpath in time. Plugins that must run after compinit are marked kind:defer
 # in the list (zsh-syntax-highlighting) and are sourced at the first prompt.
+if [[ -z ${DOTFILES_NIX_ZSH_HIGHLIGHT:-} ]]; then
 for antidote_zsh in "${ANTIDOTE_ZSH_FILE:-$HOME/.antidote/antidote.zsh}" "$HOME/.local/share/antidote/antidote.zsh"; do
     [[ -r "$antidote_zsh" ]] || continue
     source "$antidote_zsh"
@@ -53,6 +53,7 @@ for antidote_zsh in "${ANTIDOTE_ZSH_FILE:-$HOME/.antidote/antidote.zsh}" "$HOME/
     break
 done
 unset antidote_zsh
+fi
 
 # Completion
 autoload -Uz compinit && compinit
@@ -106,4 +107,8 @@ fi
 # set PATH so it includes users private bin if it exists
 if [ -d "$HOME/bin" ] ; then
     PATH="$HOME/bin:$PATH"
+fi
+
+if [[ -n ${DOTFILES_NIX_ZSH_HIGHLIGHT:-} ]]; then
+    source "$DOTFILES_NIX_ZSH_HIGHLIGHT"
 fi

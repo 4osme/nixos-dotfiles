@@ -18,6 +18,7 @@
       WorkingDirectory = "%S/moonlight-web-stream";
       ExecStartPre = "${pkgs.coreutils}/bin/ln -sfn ${pkgs.moonlight-web-stream}/share/moonlight-web-stream/static %S/moonlight-web-stream/static";
       ExecStart = "${pkgs.moonlight-web-stream}/bin/web-server";
+      Environment = [ "BIND_ADDRESS=127.0.0.1:8080" ];
       Restart = "on-failure";
       RestartSec = 5;
     };

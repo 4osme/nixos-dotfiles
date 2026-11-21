@@ -38,11 +38,7 @@
   `buildPhase` で webpack だけを実行する (`buildNpmPackage` の postPatch は
   npm-deps にしか適用されないため)。
 
-## main-desktop での起動
+## 配置
 
-```sh
-systemctl --user start moonlight-web-stream
-systemctl --user stop moonlight-web-stream
-```
-
-設定とデータは `~/.local/state/moonlight-web-stream/server/` に置かれる。
+パッケージ定義は残しているが、main-desktop には導入しない。
+moonlight-web-stream の実行環境とサービスは別途管理する。

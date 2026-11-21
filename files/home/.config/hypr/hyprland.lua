@@ -513,7 +513,10 @@ hl.layer_rule({ name = "rofi",            match = { namespace = "rofi" },       
 for _, frag in ipairs({ "outputs", "cursor", "input", "colors", "windowrules", "layout" }) do
     local path = _HOME .. "/.config/hypr/dms/" .. frag .. ".lua"
     if _exists(path) then
-        pcall(dofile, path)
+        local ok = pcall(dofile, path)
+        if not ok then
+            hl.notification.create({ text = "hypr: failed to load " .. path, duration = 5000 })
+        end
     end
 end
 
