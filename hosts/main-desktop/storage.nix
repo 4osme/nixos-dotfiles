@@ -34,23 +34,13 @@
     ];
   };
 
-  fileSystems."/mnt/develop" = {
-    device = "/dev/disk/by-label/develop";
-    fsType = "xfs";
+  fileSystems."/games" = {
+    device = "/dev/disk/by-label/NIXROOT";
+    fsType = "btrfs";
     options = [
-      "defaults"
+      "subvol=@games"
+      "compress=zstd:5"
       "noatime"
-      "nofail"
     ];
   };
-
-  swapDevices = [
-    {
-      device = "/dev/disk/by-label/swapart";
-      # Below zram (zramSwap.priority = 10 in modules/system/boot.nix), so the
-      # disk swap is only used once zram is full.
-      priority = 5;
-    }
-  ];
-  boot.resumeDevice = lib.mkDefault "/dev/disk/by-label/swapart";
 }

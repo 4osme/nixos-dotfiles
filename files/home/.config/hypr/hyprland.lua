@@ -66,7 +66,7 @@ hl.env("XCURSOR_SIZE", "36")
 hl.env("XDG_CURRENT_DESKTOP", "Hyprland")
 hl.env("XDG_SESSION_TYPE", "wayland")
 hl.env("XDG_SESSION_DESKTOP", "Hyprland")
--- IME: fcitx5 runs on the host (modules/system/locale.nix) and GTK/Qt apps
+-- IME: fcitx5 runs on the host (modules/nixos/system/locale.nix) and GTK/Qt apps
 -- reach it through these variables.
 hl.env("GTK_IM_MODULE", "fcitx")
 hl.env("QT_IM_MODULE", "fcitx")
@@ -78,7 +78,7 @@ hl.env("INPUT_METHOD", "fcitx")
 -- clipboard / wallpaper / OSD are Dux Shell (dms.service, a systemd user
 -- service from programs.dank-material-shell) that starts with the graphical
 -- session. hyprlock, gnome-keyring and ydotoold are also user services
--- (home/services.nix, programs.hyprlock) and start with the session.
+-- (modules/home-manager/services.nix, programs.hyprlock) and start with the session.
 hl.on("hyprland.start", function()
     hl.exec_cmd("dbus-update-activation-environment --systemd --all")
     hl.exec_cmd("systemctl --user import-environment QT_QPA_PLATFORMTHEME GTK_IM_MODULE QT_IM_MODULE XMODIFIERS")

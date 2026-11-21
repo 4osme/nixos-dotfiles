@@ -10,8 +10,8 @@ Cloudflare Tunnel も別環境で管理し、このホストには導入しな�
 | 定義 | 場所 | 内容 |
 |---|---|---|
 | `sunshine` パッケージ | `pkgs/sunshine/` | `../sunshine-nix` から vendored、JIS キーボードパッチ付き (`overlays/default.nix` で `pkgs.sunshine` を override) |
-| モジュール | `modules/environments/main-desktop/sunshine.nix` | `sunshine` をインストール |
-| ユーザーサービス | `home/sunshine.nix` | systemd ユニット定義 (`home/default.nix` が main-desktop のときだけ import) |
+| モジュール | `hosts/main-desktop/sunshine.nix` | `sunshine` をインストール |
+| ユーザーサービス | `modules/home-manager/sunshine.nix` | systemd ユニット定義 (`hosts/main-desktop/home.nix` が import) |
 | 補助スクリプト | `files/home-main-desktop/.local/bin/sunshine-session` | 仮想モニタの作成/削除とサービス起停を一括で行う |
 
 ## systemd ユニット

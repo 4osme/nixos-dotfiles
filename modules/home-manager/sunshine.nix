@@ -1,5 +1,5 @@
 # Sunshine (game streaming host), manual and main-desktop only
-# (imported conditionally from home/default.nix).
+# (selected by hosts/main-desktop/home.nix).
 #
 # Nothing is enabled at login on purpose: start a streaming session from a
 # terminal/SSH with

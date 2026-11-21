@@ -126,7 +126,7 @@ def set_config(key, value):
 
 
 def sunshine(action, check=True):
-    # The unit is defined by home/sunshine.nix but intentionally not enabled.
+    # The unit is defined by modules/home-manager/sunshine.nix but not enabled.
     run("systemctl", "--user", action, "sunshine", check=check)
 
 

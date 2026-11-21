@@ -1,7 +1,7 @@
 { pkgs, inputs, ... }:
 {
   home.packages = with pkgs; [
-    # --- tools (AGENTS.md) ---
+    # --- tools ---
     fastfetch
     git
     gh # github-cli
@@ -26,7 +26,7 @@
     ghostty
     zsh
 
-    # --- Dux utils (modules are enabled in home/default.nix). dgop backs the
+    # --- Dux utils (modules are enabled in desktop.nix). dgop backs the
     # DMS system-monitoring widgets via PATH. ---
     inputs.dgop.packages.${pkgs.stdenv.hostPlatform.system}.default
 

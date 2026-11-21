@@ -7,7 +7,6 @@ final: prev: {
   fcitx5-mozkey = final.callPackage ../pkgs/mozkey { };
   sddm-hyprtomic-theme = final.callPackage ../pkgs/sddm-theme { };
   libfprint-cs9711 = final.callPackage ../pkgs/libfprint-cs9711 { };
-  moonlight-web-stream = final.callPackage ../pkgs/moonlight-web-stream { };
 
   # nixpkgs 26.05's tela-circle-icon-theme ships a few dangling XSI alias
   # symlinks and the fixup check rejects the build (so it is not on

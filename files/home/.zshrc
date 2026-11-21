@@ -32,7 +32,7 @@ setopt magic_equal_subst
 
 # Extra shell snippets (shortcuts.zsh, generated terminal colors) and, on
 # NixOS, the store paths the .zshrc itself cannot know about
-# (home/zsh.nix → zshrc.d/10-nix-plugins.zsh). Sourced before compinit so
+# (modules/home-manager/zsh.nix → zshrc.d/10-nix-plugins.zsh). Sourced before compinit so
 # drop-ins can extend the completion setup.
 for f in ~/.config/zshrc.d/*.zsh(N) ~/.config/zshrc.d/*.sh(N); do
     source "$f"

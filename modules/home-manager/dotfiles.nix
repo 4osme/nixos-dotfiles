@@ -12,10 +12,9 @@
 #   ~/.config/fcitx5/profile    — written by fcitx5 (engine / group order)
 #   ~/.config/nvim/lazy-lock.json — lazy.nvim rewrites it on install/update (see below)
 {
-  config,
   lib,
   pkgs,
-  dotfilesOverlay ? null,
+  dotfilesOverlay,
   ...
 }:
 let
@@ -49,12 +48,10 @@ let
   # lazy-lock.json is delivered by the activation below instead of as a store
   # link: lazy.nvim `assert`s on writing the lockfile, so a read-only link
   # fails the first `install` (fresh home) and every `:Lazy update`.
-  files = lib.filterAttrs (
-    n: _: !(lib.any (prefix: lib.hasPrefix prefix n) nvimRepoOnlyDirs)
-  ) (
-    removeAttrs
-      (walk ../files/home "" // (if dotfilesOverlay != null then walk dotfilesOverlay "" else { }))
-      ([ ".config/nvim/lazy-lock.json" ] ++ nvimRepoOnlyFiles)
+  files = lib.filterAttrs (n: _: !(lib.any (prefix: lib.hasPrefix prefix n) nvimRepoOnlyDirs)) (
+    removeAttrs (
+      walk ../../files/home "" // (if dotfilesOverlay != null then walk dotfilesOverlay "" else { })
+    ) ([ ".config/nvim/lazy-lock.json" ] ++ nvimRepoOnlyFiles)
   );
 
   xdgFiles = lib.filterAttrs (n: _: lib.hasPrefix ".config/" n) files;
@@ -65,9 +62,11 @@ let
   # a machine and copy the resulting ~/.config/nvim/lazy-lock.json back into
   # files/home/.config/nvim/lazy-lock.json; every rebuild then rewrites the
   # writable copy whenever the contents differ.
-  nvimLockfile = ../files/home/.config/nvim/lazy-lock.json;
+  nvimLockfile = ../../files/home/.config/nvim/lazy-lock.json;
 in
 {
+  _module.args.dotfilesOverlay = lib.mkDefault null;
+
   home.activation.nvimLockfile = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
     lock="$HOME/.config/nvim/lazy-lock.json"
     if ! ${pkgs.diffutils}/bin/cmp -s ${nvimLockfile} "$lock"; then

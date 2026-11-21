@@ -1,5 +1,4 @@
-# Intel GPU stack of the source desktop (AGENTS.md: Intel GPU ドライバ関連,
-# i915 ドライバの出禁と iGPU の xe ドライバ適応).
+# Intel GPU stack for the Arrow Lake desktop.
 { pkgs, ... }:
 {
   hardware.graphics = {
@@ -16,7 +15,5 @@
     ];
   };
 
-  # Arrow Lake-P iGPU (8086:7d51) runs on the xe driver; ban i915 so it can
-  # never claim the iGPU.
   boot.blacklistedKernelModules = [ "i915" ];
 }

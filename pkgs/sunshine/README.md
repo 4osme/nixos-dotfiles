@@ -4,8 +4,8 @@ This directory is a verbatim copy of the sunshine-nix tree's patch set — the
 patches only, there is no standalone derivation here. The packaging lives in
 the dotfiles overlay: `overlays/default.nix` patches nixpkgs' `sunshine` with
 `overrideAttrs`, including the libvirtualhid patch via `postPatch`. main-desktop
-installs it (`modules/environments/main-desktop/sunshine.nix`) and
-`home/sunshine.nix` runs it as a manual user service.
+installs it (`hosts/main-desktop/sunshine.nix`) and
+`modules/home-manager/sunshine.nix` runs it as a manual user service.
 
 Because the package is `pkgs.sunshine` after the overlay is applied, it is also
 in `flake.nix`'s `packages` output (`nix build .#sunshine`) and in the CI
@@ -63,8 +63,8 @@ overlay 経由（dotfiles の標準経路）:
 ```nix
 # nixpkgs.overlays = [ (import ./overlays) ];
 # 以降 pkgs.sunshine がパッチ済み。main-desktop は
-# modules/environments/main-desktop/sunshine.nix で environment.systemPackages に
-# 入れ、home/sunshine.nix の user unit から起動する。
+# hosts/main-desktop/sunshine.nix で environment.systemPackages に
+# 入れ、modules/home-manager/sunshine.nix の user unit から起動する。
 ```
 
 単体でビルドする場合（CI と同じ）:

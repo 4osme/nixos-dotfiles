@@ -1,9 +1,9 @@
 # The desktop user (matches the source machine's account).
 { pkgs, ... }:
 {
-  users.users.underdone = {
+  users.users."4osme" = {
     isNormalUser = true;
-    description = "underdone";
+    description = "4osme";
     # wheel: admin; networkmanager: nmcli; input/video: session device access.
     extraGroups = [
       "wheel"
@@ -12,7 +12,6 @@
       "input"
     ];
     shell = pkgs.zsh;
-    # TODO(manual): run `passwd underdone` right after the first login.
     initialPassword = "nixos";
   };
 

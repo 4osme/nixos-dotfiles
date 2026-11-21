@@ -3,7 +3,6 @@
 {
   pkgs,
   inputs,
-  hostName,
   lib,
   ...
 }:
@@ -21,12 +20,7 @@
     inputs.dsearch.homeModules.default
     inputs.dfiles.homeModules.default
     inputs.dcal.homeModules.dank-calendar
-  ]
-  ++ lib.optional (hostName == "main-desktop") ./sunshine.nix;
-
-  home.username = "underdone";
-  home.homeDirectory = "/home/underdone";
-  home.stateVersion = "26.05";
+  ];
 
   programs.dank-material-shell = {
     enable = true;

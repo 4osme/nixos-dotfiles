@@ -9,7 +9,7 @@
 }:
 let
   gate = pkgs.writeShellScript "pam-fingerprint-gate" (
-    builtins.readFile ../../files/system/pam.d/pam-fingerprint-gate
+    builtins.readFile ../../../files/system/pam.d/pam-fingerprint-gate
   );
   pam = config.security.pam.package;
   fprintd = pkgs.fprintd;

@@ -1,6 +1,6 @@
 # Session security bits: polkit (auth dialogs are served by Dux Shell's
 # built-in polkit agent), the uinput device for ydotoold and the fingerprint
-# gate helper shared by SDDM/hyprlock (see modules/system/sddm.nix).
+# gate helper shared by SDDM/hyprlock (see sddm.nix).
 { pkgs, ... }:
 {
   security.polkit.enable = true;
