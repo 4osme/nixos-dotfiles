@@ -1,5 +1,8 @@
 {
-  imports = [ ../../modules/home-manager/desktop.nix ];
+  imports = [
+    ../../modules/home-manager/desktop.nix
+    ../../modules/home-manager/sshfs-nas.nix
+  ];
 
   home.username = "4osme";
   home.homeDirectory = "/home/4osme";

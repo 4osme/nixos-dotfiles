@@ -64,6 +64,9 @@ jobs:
         with:
           name: ${{ env.CACHIX_CACHE_NAME }}
           authToken: ${{ env.CACHIX_AUTH_TOKEN }}
+          # Upload the store diff at job completion instead of using the
+          # daemon, whose shutdown can fail with stuck jobs/drain timeouts.
+          useDaemon: false
 
       - name: Check formatting
         run: nix fmt -- --ci .
