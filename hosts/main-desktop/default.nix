@@ -11,6 +11,7 @@
     ./sunshine.nix
     ./users.nix
     ./home.nix
+    ./networking.nix
     ./storage.nix
     ./hardware-configuration.nix
   ];
